@@ -5,7 +5,7 @@ const wss = new WebSocket.Server({ port: 5000 }, () =>
   console.log("✅ Сервер запущен на порту 5000")
 );
 
-const MAX_PLAYERS = 8; // Увеличил до 8
+const MAX_PLAYERS = 5; // Увеличил до 8
 let allPlayers = [];
 let host = null;
 let gameState = { started: false };
