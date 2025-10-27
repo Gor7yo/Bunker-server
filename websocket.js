@@ -10,6 +10,7 @@ const MAX_PLAYERS = 5; // Увеличил до 8
 let allPlayers = [];
 let host = null;
 let gameState = { started: false };
+let bannedPlayers = new Set(); // Set из ID изгнанных игроков
 
 // ============================
 // 🎲 Генерация случайных характеристик игрока
@@ -428,6 +429,35 @@ wss.on("connection", (ws) => {
           
           // Обработка каждой карты
           handleActionCard(actionType, parameters, allConnections);
+          break;
+        }
+
+        // 🚫 Изгнание/возврат игрока
+        case "toggle_ban_player": {
+          if (ws.role === "host") {
+            const targetPlayerId = data.playerId;
+            const allConnections = [...allPlayers, host];
+            const targetPlayer = allConnections.find(p => p && p.id === targetPlayerId);
+            
+            if (targetPlayer && bannedPlayers.has(targetPlayerId)) {
+              // Возвращаем игрока
+              bannedPlayers.delete(targetPlayerId);
+              console.log(`✅ Игрок ${targetPlayer.name} возвращен в игру`);
+            } else if (targetPlayer) {
+              // Изгоняем игрока
+              bannedPlayers.add(targetPlayerId);
+              console.log(`🚫 Игрок ${targetPlayer.name} изгнан`);
+            }
+            
+            // Отправляем обновление всем клиентам
+            broadcast({
+              type: "player_banned",
+              playerId: targetPlayerId,
+              banned: bannedPlayers.has(targetPlayerId)
+            });
+            
+            sendPlayersUpdate();
+          }
           break;
         }
 
