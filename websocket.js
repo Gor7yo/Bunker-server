@@ -64,8 +64,419 @@ function generateAllPlayerCards() {
 // ⚡ Обработка карт действий
 // ============================
 function handleActionCard(actionType, parameters, allConnections) {
-  console.log(`⚡ Обработка карты: ${actionType}`);
-  // Здесь будет детальная логика для каждой карты
+  console.log(`⚡ Обработка карты: ${actionType}`, parameters);
+  
+  switch (actionType) {
+    case "Обмен судьбами":
+      handleExchangeFates(parameters.selectedPlayers, allConnections);
+      break;
+    
+    case "Выборочный обмен":
+      handleSelectiveExchange(parameters.selectedPlayers, parameters.selectedCharacteristics, allConnections);
+      break;
+    
+    case "Подозрение":
+      handleSuspicion(parameters.selectedPlayers, allConnections);
+      break;
+    
+    case "Проверка досье":
+      handleDossierCheck(parameters.selectedPlayers, parameters.selectedCharacteristics, allConnections);
+      break;
+    
+    case "Атака на репутацию":
+      handleReputationAttack(parameters.selectedPlayers, allConnections);
+      break;
+    
+    case "Реинкарнация":
+      handleReincarnation(parameters.selectedPlayers, allConnections);
+      break;
+    
+    case "Переквалификация":
+      handleRetraining(parameters.selectedPlayers, allConnections);
+      break;
+    
+    case "Фобия исчезла":
+      handlePhobiaGone(parameters.selectedPlayers, allConnections);
+      break;
+    
+    case "Сбросс здоровья":
+      handleHealthReset(allConnections);
+      break;
+    
+    case "Второй шанс":
+      handleSecondChance(parameters.selectedPlayers, allConnections);
+      break;
+    
+    case "Иммунитет":
+      handleImmunity(parameters.selectedPlayers, allConnections);
+      break;
+    
+    case "Тайное знание":
+      handleSecretKnowledge(parameters.selectedPlayers, parameters.selectedCharacteristics, allConnections);
+      break;
+    
+    case "Перезапуск":
+      handleRestart(allConnections);
+      break;
+    
+    case "Исповедь":
+      handleConfession(parameters.selectedPlayers, parameters.selectedCharacteristics, allConnections);
+      break;
+    
+    case "Генная терапия":
+      handleGeneTherapy(parameters.selectedPlayers, parameters.selectedCharacteristics, allConnections);
+      break;
+    
+    case "Наследие":
+      handleLegacy(parameters.selectedPlayers, allConnections);
+      break;
+    
+    case "Религиозный фанатизм":
+      handleReligiousFanaticism(parameters.selectedPlayers, allConnections);
+      break;
+    
+    case "Экспериментальное лечение":
+      handleExperimentalTreatment(parameters.selectedPlayers, allConnections);
+      break;
+    
+    default:
+      console.log(`⚠️ Неизвестная карта действия: ${actionType}`);
+  }
+}
+
+// Обмен судьбами - меняются все открытые характеристики
+function handleExchangeFates(playerIds, allConnections) {
+  if (!playerIds || playerIds.length !== 2) {
+    console.error("❌ Обмен судьбами требует двух игроков");
+    return;
+  }
+  
+  const [player1Id, player2Id] = playerIds;
+  const player1 = allConnections.find(p => p && p.id === player1Id);
+  const player2 = allConnections.find(p => p && p.id === player2Id);
+  
+  if (!player1 || !player2 || !player1.characteristics || !player2.characteristics) {
+    console.error("❌ Игроки не найдены или у них нет характеристик");
+    return;
+  }
+  
+  // Меняем только открытые характеристики
+  const categories = ['bandage', 'actions', 'fact', 'fobia', 'health', 'hobbie', 'age', 'proffesion'];
+  
+  categories.forEach(category => {
+    const char1 = player1.characteristics[category];
+    const char2 = player2.characteristics[category];
+    
+    if (char1 && char2 && char1.revealed && char2.revealed) {
+      // Обмен значениями
+      const tempValue = char1.value;
+      char1.value = char2.value;
+      char2.value = tempValue;
+      
+      console.log(`🔄 Обмен ${category}: ${char2.value} <-> ${char1.value}`);
+    }
+  });
+  
+  // Отправляем обновление всем клиентам
+  sendPlayersUpdate();
+}
+
+// Сброс здоровья - всем игрокам нужно вытянуть новое здоровье
+function handleHealthReset(allConnections) {
+  allConnections.forEach(player => {
+    if (player && player.characteristics && player.characteristics.health) {
+      // Получаем новое случайное здоровье
+      const healthData = propertiesData.propertiesCategory.find(cat => cat.category === 'health');
+      
+      if (healthData && healthData.items.length > 0) {
+        const randomIndex = Math.floor(Math.random() * healthData.items.length);
+        const selectedHealth = healthData.items[randomIndex];
+        
+        // Сохраняем статус revealed
+        const wasRevealed = player.characteristics.health.revealed;
+        
+        player.characteristics.health = {
+          value: selectedHealth.value,
+          description: selectedHealth.description || null,
+          experience: selectedHealth.experience || null,
+          revealed: wasRevealed // Сохраняем статус раскрытия
+        };
+        
+        console.log(`🏥 Новое здоровье для ${player.name}: ${selectedHealth.value} (раскрыто: ${wasRevealed})`);
+      }
+    }
+  });
+  
+  // Отправляем обновление всем клиентам
+  sendPlayersUpdate();
+}
+
+// Выборочный обмен - обменяй одну характеристику с любым игроком
+function handleSelectiveExchange(playerIds, characteristic, allConnections) {
+  if (!playerIds || playerIds.length !== 2 || !characteristic) {
+    console.error("❌ Выборочный обмен требует двух игроков и характеристику");
+    return;
+  }
+  
+  const [player1Id, player2Id] = playerIds;
+  const player1 = allConnections.find(p => p && p.id === player1Id);
+  const player2 = allConnections.find(p => p && p.id === player2Id);
+  
+  if (!player1 || !player2 || !player1.characteristics || !player2.characteristics) {
+    return;
+  }
+  
+  const char1 = player1.characteristics[characteristic];
+  const char2 = player2.characteristics[characteristic];
+  
+  if (char1 && char2) {
+    const tempValue = char1.value;
+    const tempRevealed = char1.revealed;
+    char1.value = char2.value;
+    char1.revealed = char2.revealed;
+    char2.value = tempValue;
+    char2.revealed = tempRevealed;
+    console.log(`🔄 Выборочный обмен ${characteristic}`);
+  }
+  
+  sendPlayersUpdate();
+}
+
+// Подозрение - один игрок раскрывает случайную закрытую характеристику
+function handleSuspicion(playerIds, allConnections) {
+  if (!playerIds || playerIds.length !== 1) return;
+  
+  const player = allConnections.find(p => p && p.id === playerIds[0]);
+  if (!player || !player.characteristics) return;
+  
+  const closedCharacteristics = Object.keys(player.characteristics).filter(
+    key => player.characteristics[key] && !player.characteristics[key].revealed
+  );
+  
+  if (closedCharacteristics.length > 0) {
+    const randomKey = closedCharacteristics[Math.floor(Math.random() * closedCharacteristics.length)];
+    player.characteristics[randomKey].revealed = true;
+    console.log(`🔍 Раскрыта характеристика: ${randomKey}`);
+  }
+  
+  sendPlayersUpdate();
+}
+
+// Проверка досье - посмотреть одну закрытую характеристику
+function handleDossierCheck(playerIds, characteristic, allConnections) {
+  if (!playerIds || playerIds.length !== 1 || !characteristic) return;
+  console.log(`📋 Проверка досье игрока ${playerIds[0]}, характеристика: ${characteristic}`);
+  sendPlayersUpdate();
+}
+
+// Атака на репутацию - игрок теряет право говорить
+function handleReputationAttack(playerIds, allConnections) {
+  if (!playerIds || playerIds.length !== 1) return;
+  
+  const player = allConnections.find(p => p && p.id === playerIds[0]);
+  if (!player) return;
+  
+  player.muted = true;
+  console.log(`🔇 Игрок ${player.name} потерял право говорить`);
+  
+  sendPlayersUpdate();
+}
+
+// Реинкарнация - изменить возраст
+function handleReincarnation(playerIds, allConnections) {
+  if (!playerIds || playerIds.length !== 1) return;
+  
+  const player = allConnections.find(p => p && p.id === playerIds[0]);
+  if (!player || !player.characteristics) return;
+  
+  const ageData = propertiesData.propertiesCategory.find(cat => cat.category === 'age');
+  if (ageData && ageData.items.length > 0) {
+    const randomIndex = Math.floor(Math.random() * ageData.items.length);
+    const selectedAge = ageData.items[randomIndex];
+    player.characteristics.age.value = selectedAge.value;
+    console.log(`🔄 Новый возраст: ${selectedAge.value}`);
+  }
+  
+  sendPlayersUpdate();
+}
+
+// Переквалификация - заменить профессию
+function handleRetraining(playerIds, allConnections) {
+  if (!playerIds || playerIds.length !== 1) return;
+  
+  const player = allConnections.find(p => p && p.id === playerIds[0]);
+  if (!player || !player.characteristics) return;
+  
+  const professionData = propertiesData.propertiesCategory.find(cat => cat.category === 'proffesion');
+  if (professionData && professionData.items.length > 0) {
+    const randomIndex = Math.floor(Math.random() * professionData.items.length);
+    const selectedProf = professionData.items[randomIndex];
+    player.characteristics.proffesion.value = selectedProf.value;
+    console.log(`🎓 Новая профессия: ${selectedProf.value}`);
+  }
+  
+  sendPlayersUpdate();
+}
+
+// Фобия исчезла - избавиться от фобии
+function handlePhobiaGone(playerIds, allConnections) {
+  if (!playerIds || playerIds.length !== 1) return;
+  
+  const player = allConnections.find(p => p && p.id === playerIds[0]);
+  if (!player || !player.characteristics) return;
+  
+  const wasRevealed = player.characteristics.fobia ? player.characteristics.fobia.revealed : false;
+  
+  player.characteristics.fobia = {
+    value: "Нет фобии",
+    description: null,
+    experience: null,
+    revealed: wasRevealed
+  };
+  console.log(`😌 Фобия исчезла`);
+  
+  sendPlayersUpdate();
+}
+
+// Второй шанс - вернуть изгнанного игрока
+function handleSecondChance(playerIds, allConnections) {
+  console.log(`🔄 Второй шанс используется`);
+  sendPlayersUpdate();
+}
+
+// Иммунитет - нельзя быть изгнанным
+function handleImmunity(playerIds, allConnections) {
+  if (!playerIds || playerIds.length !== 1) return;
+  
+  const player = allConnections.find(p => p && p.id === playerIds[0]);
+  if (!player) return;
+  
+  player.immune = true;
+  console.log(`🛡️ Игрок ${player.name} получил иммунитет`);
+  
+  sendPlayersUpdate();
+}
+
+// Тайное знание - посмотреть одну характеристику
+function handleSecretKnowledge(playerIds, characteristic, allConnections) {
+  console.log(`🔮 Тайное знание`);
+  sendPlayersUpdate();
+}
+
+// Перезапуск - каждый игрок сбрасывает одну открытую характеристику
+function handleRestart(allConnections) {
+  allConnections.forEach(player => {
+    if (player && player.characteristics) {
+      const openCharacteristics = Object.keys(player.characteristics).filter(
+        key => player.characteristics[key] && player.characteristics[key].revealed
+      );
+      
+      if (openCharacteristics.length > 0) {
+        const randomKey = openCharacteristics[Math.floor(Math.random() * openCharacteristics.length)];
+        const categoryData = propertiesData.propertiesCategory.find(cat => cat.category === randomKey);
+        
+        if (categoryData && categoryData.items.length > 0) {
+          const randomIndex = Math.floor(Math.random() * categoryData.items.length);
+          const selectedItem = categoryData.items[randomIndex];
+          
+          player.characteristics[randomKey].value = selectedItem.value;
+          player.characteristics[randomKey].description = selectedItem.description || null;
+          console.log(`🔄 Перезапуск: ${randomKey}`);
+        }
+      }
+    }
+  });
+  
+  sendPlayersUpdate();
+}
+
+// Исповедь - игрок сам раскрывает характеристику
+function handleConfession(playerIds, characteristic, allConnections) {
+  if (!playerIds || playerIds.length !== 1 || !characteristic) return;
+  
+  const player = allConnections.find(p => p && p.id === playerIds[0]);
+  if (!player || !player.characteristics || !player.characteristics[characteristic]) return;
+  
+  player.characteristics[characteristic].revealed = true;
+  console.log(`📖 Исповедь: раскрыта ${characteristic}`);
+  
+  sendPlayersUpdate();
+}
+
+// Генная терапия - поменять здоровье или фобию
+function handleGeneTherapy(playerIds, characteristic, allConnections) {
+  if (!playerIds || playerIds.length !== 1 || !characteristic) return;
+  
+  const player = allConnections.find(p => p && p.id === playerIds[0]);
+  if (!player || !player.characteristics) return;
+  
+  if (characteristic === 'health' || characteristic === 'fobia') {
+    const categoryData = propertiesData.propertiesCategory.find(cat => cat.category === characteristic);
+    if (categoryData && categoryData.items.length > 0) {
+      const randomIndex = Math.floor(Math.random() * categoryData.items.length);
+      const selectedItem = categoryData.items[randomIndex];
+      const wasRevealed = player.characteristics[characteristic] ? player.characteristics[characteristic].revealed : false;
+      
+      player.characteristics[characteristic] = {
+        value: selectedItem.value,
+        description: selectedItem.description || null,
+        experience: selectedItem.experience || null,
+        revealed: wasRevealed
+      };
+      console.log(`🧬 Генная терапия: ${characteristic}`);
+    }
+  }
+  
+  sendPlayersUpdate();
+}
+
+// Наследие - профессия переходит к игроку справа
+function handleLegacy(playerIds, allConnections) {
+  if (!playerIds || playerIds.length !== 1) return;
+  console.log(`🏛️ Наследие установлено`);
+  sendPlayersUpdate();
+}
+
+// Религиозный фанатизм - можно отменить одно решение голосования
+function handleReligiousFanaticism(playerIds, allConnections) {
+  if (!playerIds || playerIds.length !== 1) return;
+  
+  const player = allConnections.find(p => p && p.id === playerIds[0]);
+  if (!player) return;
+  
+  player.hasProphetPower = true;
+  console.log(`✝️ Религиозный фанатизм активирован`);
+  
+  sendPlayersUpdate();
+}
+
+// Экспериментальное лечение
+function handleExperimentalTreatment(playerIds, allConnections) {
+  if (!playerIds || playerIds.length !== 1) return;
+  
+  const player = allConnections.find(p => p && p.id === playerIds[0]);
+  if (!player || !player.characteristics) return;
+  
+  const healed = Math.random() < 0.5;
+  
+  if (!healed) {
+    const fobiaData = propertiesData.propertiesCategory.find(cat => cat.category === 'fobia');
+    if (fobiaData && fobiaData.items.length > 0) {
+      const randomIndex = Math.floor(Math.random() * fobiaData.items.length);
+      const selectedFobia = fobiaData.items[randomIndex];
+      const wasRevealed = player.characteristics.fobia ? player.characteristics.fobia.revealed : false;
+      
+      player.characteristics.fobia = {
+        value: selectedFobia.value,
+        description: selectedFobia.description || null,
+        experience: selectedFobia.experience || null,
+        revealed: wasRevealed
+      };
+    }
+  }
+  
+  console.log(`💊 Экспериментальное лечение: ${healed ? 'вылечен' : 'новая фобия'}`);
+  sendPlayersUpdate();
 }
 
 // ============================
