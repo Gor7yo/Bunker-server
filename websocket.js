@@ -60,6 +60,14 @@ function generateAllPlayerCards() {
 }
 
 // ============================
+// ⚡ Обработка карт действий
+// ============================
+function handleActionCard(actionType, parameters, allConnections) {
+  console.log(`⚡ Обработка карты: ${actionType}`);
+  // Здесь будет детальная логика для каждой карты
+}
+
+// ============================
 // 📡 Функция отправки всем клиентам
 // ============================
 function broadcast(data, excludeWs = null) {
@@ -407,6 +415,19 @@ wss.on("connection", (ws) => {
           } else {
             ws.send(JSON.stringify({ type: "error", message: "Характеристика не найдена" }));
           }
+          break;
+        }
+
+        // ⚡ Обработка карт действий
+        case "execute_action_card": {
+          const actionType = data.actionType;
+          const parameters = data.parameters;
+          const allConnections = [...allPlayers, host];
+          
+          console.log(`⚡ Выполняется карта действия: ${actionType}`);
+          
+          // Обработка каждой карты
+          handleActionCard(actionType, parameters, allConnections);
           break;
         }
 
