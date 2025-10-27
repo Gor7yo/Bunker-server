@@ -1,5 +1,6 @@
 // server.js
 const WebSocket = require("ws");
+const propertiesData = require("./properties.json");
 
 const wss = new WebSocket.Server({ port: 5000 }, () =>
   console.log("✅ Сервер запущен на порту 5000")
@@ -9,6 +10,54 @@ const MAX_PLAYERS = 3; // Увеличил до 8
 let allPlayers = [];
 let host = null;
 let gameState = { started: false };
+
+// ============================
+// 🎲 Генерация случайных характеристик игрока
+// ============================
+function generatePlayerCharacteristics() {
+  const characteristics = {};
+  
+  // Список категорий для генерации
+  const categories = ['bandage', 'actions', 'fact', 'fobia', 'health', 'hobbie', 'age', 'proffesion'];
+  
+  categories.forEach(category => {
+    const categoryData = propertiesData.propertiesCategory.find(cat => cat.category === category);
+    if (categoryData && categoryData.items.length > 0) {
+      const randomIndex = Math.floor(Math.random() * categoryData.items.length);
+      const selectedItem = categoryData.items[randomIndex];
+      
+      characteristics[category] = {
+        value: selectedItem.value,
+        description: selectedItem.description || null,
+        experience: selectedItem.experience || null,
+        revealed: false // По умолчанию все характеристики скрыты
+      };
+    }
+  });
+  
+  return characteristics;
+}
+
+// ============================
+// 🎯 Генерация карт для всех игроков при старте игры
+// ============================
+function generateAllPlayerCards() {
+  console.log("🎲 Генерируем карты для всех игроков...");
+  
+  // Генерируем карты для обычных игроков
+  allPlayers.forEach(player => {
+    if (player.readyState === WebSocket.OPEN) {
+      player.characteristics = generatePlayerCharacteristics();
+      console.log(`📋 Карты для ${player.name}:`, Object.keys(player.characteristics));
+    }
+  });
+  
+  // Генерируем карты для ведущего
+  if (host && host.readyState === WebSocket.OPEN) {
+    host.characteristics = generatePlayerCharacteristics();
+    console.log(`📋 Карты для ведущего ${host.name}:`, Object.keys(host.characteristics));
+  }
+}
 
 // ============================
 // 📡 Функция отправки всем клиентам
@@ -52,6 +101,7 @@ function sendPlayersUpdate() {
       name: p.name,
       ready: p.ready,
       role: p.role,
+      characteristics: p.characteristics || null
     })),
     readyCount,
     totalPlayers,
@@ -80,11 +130,18 @@ function checkAllReady() {
 
   if (allReady && !gameState.started) {
     gameState.started = true;
-    console.log("🎮 Игра началась! Устанавливаем WebRTC соединения...");
+    console.log("🎮 Игра началась! Генерируем карты и устанавливаем WebRTC соединения...");
+    
+    // Генерируем карты для всех игроков
+    generateAllPlayerCards();
+    
     broadcast({ 
       type: "game_started",
-      message: "Игра начинается! Устанавливаем видеосвязь..."
+      message: "Игра начинается! Карты сгенерированы, устанавливаем видеосвязь..."
     });
+    
+    // Отправляем обновленные данные игроков с характеристиками
+    sendPlayersUpdate();
     
     // Даем время на установку WebRTC соединений
     setTimeout(() => {
@@ -250,22 +307,6 @@ wss.on("connection", (ws) => {
           break;
         }
 
-        // 🔄 Сброс состояния игры
-        case "reset_game": {
-          if (ws.role === "host") {
-            gameState.started = false;
-            allPlayers.forEach(p => p.ready = false);
-            if (host) host.ready = false;
-            
-            broadcast({
-              type: "game_reset",
-              message: "Игра сброшена"
-            });
-            
-            sendPlayersUpdate();
-          }
-          break;
-        }
 
         // 📡 WebRTC сигналы - УЛУЧШЕННАЯ ВЕРСИЯ
         case "signal": {
@@ -321,6 +362,73 @@ wss.on("connection", (ws) => {
               message: data.message,
               timestamp: Date.now()
             }, ws);
+          }
+          break;
+        }
+
+        // 🎲 Запрос карт игрока
+        case "get_player_cards": {
+          const targetPlayerId = data.playerId;
+          const allConnections = [...allPlayers, host];
+          const targetPlayer = allConnections.find(p => p && p.id === targetPlayerId && p.readyState === WebSocket.OPEN);
+          
+          if (targetPlayer && targetPlayer.characteristics) {
+            ws.send(JSON.stringify({
+              type: "player_cards",
+              playerId: targetPlayerId,
+              playerName: targetPlayer.name,
+              cards: targetPlayer.characteristics
+            }));
+          } else {
+            ws.send(JSON.stringify({ type: "error", message: "Карты игрока не найдены" }));
+          }
+          break;
+        }
+
+        // 👁️ Раскрытие характеристики игрока
+        case "reveal_characteristic": {
+          const targetPlayerId = data.playerId;
+          const characteristicType = data.characteristicType;
+          const allConnections = [...allPlayers, host];
+          const targetPlayer = allConnections.find(p => p && p.id === targetPlayerId && p.readyState === WebSocket.OPEN);
+          
+          if (targetPlayer && targetPlayer.characteristics && targetPlayer.characteristics[characteristicType]) {
+            targetPlayer.characteristics[characteristicType].revealed = true;
+            
+            broadcast({
+              type: "characteristic_revealed",
+              playerId: targetPlayerId,
+              playerName: targetPlayer.name,
+              characteristicType: characteristicType,
+              characteristic: targetPlayer.characteristics[characteristicType]
+            });
+            
+            sendPlayersUpdate();
+          } else {
+            ws.send(JSON.stringify({ type: "error", message: "Характеристика не найдена" }));
+          }
+          break;
+        }
+
+        // 🔄 Сброс игры (очистка характеристик)
+        case "reset_game": {
+          if (ws.role === "host") {
+            gameState.started = false;
+            allPlayers.forEach(p => {
+              p.ready = false;
+              p.characteristics = null;
+            });
+            if (host) {
+              host.ready = false;
+              host.characteristics = null;
+            }
+            
+            broadcast({
+              type: "game_reset",
+              message: "Игра сброшена, все карты очищены"
+            });
+            
+            sendPlayersUpdate();
           }
           break;
         }
