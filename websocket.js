@@ -10,7 +10,7 @@ const MAX_PLAYERS = 5; // Увеличил до 8
 let allPlayers = [];
 let host = null;
 let adminPanel = null; // Отдельное подключение для админ-панели
-let gameState = { started: false };
+let gameState = { started: false, startTime: null };
 let bannedPlayers = new Set(); // Set из ID изгнанных игроков
 let disconnectedPlayers = new Map(); // Map: nickname -> {characteristics, id, role}
 
@@ -534,7 +534,9 @@ function sendPlayersUpdate() {
       maxRegularPlayers: MAX_PLAYERS,
       hostConnected: !!activeHost,
       hostReady: activeHost ? activeHost.ready : false,
-      gameStarted: gameState.started
+      gameStarted: gameState.started,
+      gameStartTime: gameState.startTime,
+      gameElapsedTime: gameState.started && gameState.startTime ? Date.now() - gameState.startTime : 0
     }));
   }
 
@@ -553,7 +555,9 @@ function sendPlayersUpdate() {
     maxRegularPlayers: MAX_PLAYERS,
     hostConnected: !!activeHost,
     hostReady: activeHost ? activeHost.ready : false,
-    gameStarted: gameState.started
+    gameStarted: gameState.started,
+    gameStartTime: gameState.startTime,
+    gameElapsedTime: gameState.started && gameState.startTime ? Date.now() - gameState.startTime : 0
   });
 }
 
@@ -565,7 +569,10 @@ function checkAllReady() {
   const activeHost = host && host.readyState === WebSocket.OPEN ? host : null;
 
   if (!activeHost || !activeHost.ready) {
-    gameState.started = false;
+    if (gameState.started) {
+      gameState.started = false;
+      gameState.startTime = null; // Сбрасываем время если игра была остановлена
+    }
     return;
   }
 
@@ -574,6 +581,7 @@ function checkAllReady() {
 
   if (allReady && !gameState.started) {
     gameState.started = true;
+    gameState.startTime = Date.now(); // Запоминаем время начала игры
     console.log("🎮 Игра началась! Генерируем карты и устанавливаем WebRTC соединения...");
     
     // Генерируем карты для всех игроков
@@ -962,6 +970,7 @@ wss.on("connection", (ws) => {
           if (ws.role === "admin_panel" || ws.role === "host") {
             console.log("🔄 Админ сбрасывает игру...");
             gameState.started = false;
+            gameState.startTime = null; // Сбрасываем время начала игры
             
             // Сбрасываем состояние всех активных игроков
             allPlayers.forEach(p => {
