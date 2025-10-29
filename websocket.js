@@ -11,6 +11,7 @@ let allPlayers = [];
 let host = null;
 let gameState = { started: false };
 let bannedPlayers = new Set(); // Set из ID изгнанных игроков
+let disconnectedPlayers = new Map(); // Map: nickname -> {characteristics, id, role}
 
 // ============================
 // 🎲 Генерация случайных характеристик игрока
@@ -641,51 +642,82 @@ wss.on("connection", (ws) => {
             return;
           }
 
-          // Проверка на дубликаты имен
+          // Проверка на дубликаты имен среди активных игроков
           const activePlayers = [...allPlayers, host].filter(p => p && p.readyState === WebSocket.OPEN);
           const existingPlayer = activePlayers.find(p => p.name && p.name.toLowerCase() === nickname.toLowerCase());
           
-          if (existingPlayer) {
+          if (existingPlayer && existingPlayer.id !== ws.id) {
             ws.send(JSON.stringify({ type: "error", message: "Никнейм уже занят" }));
             return;
           }
 
-          ws.name = nickname;
+          // 🔄 ПЕРЕЗАХОД: Проверяем, есть ли сохраненные данные для этого никнейма
+          const disconnectedData = disconnectedPlayers.get(nickname.toLowerCase());
+          let isReconnecting = false;
+          
+          if (disconnectedData && gameState.started) {
+            // Восстанавливаем данные игрока
+            console.log(`🔄 Игрок ${nickname} переподключается, восстанавливаем данные...`);
+            isReconnecting = true;
+            
+            // Сохраняем новый WebSocket, но с восстановленными данными
+            ws.name = nickname;
+            ws.characteristics = disconnectedData.characteristics ? JSON.parse(JSON.stringify(disconnectedData.characteristics)) : null;
+            ws.ready = disconnectedData.ready || false;
+            ws.role = disconnectedData.role || "player";
+            
+            // Удаляем из списка отключенных
+            disconnectedPlayers.delete(nickname.toLowerCase());
+            
+            console.log(`✅ Данные восстановлены для ${nickname}:`, {
+              hasCharacteristics: !!ws.characteristics,
+              characteristicsCount: ws.characteristics ? Object.keys(ws.characteristics).length : 0
+            });
+          } else {
+            // Обычный вход - просто устанавливаем имя
+            ws.name = nickname;
+          }
 
           // 🎙 Ведущий
           if (["millisana", "admin", "host", "ведущий"].includes(nickname.toLowerCase())) {
-            if (host && host.readyState === WebSocket.OPEN) {
+            if (host && host.readyState === WebSocket.OPEN && host.id !== ws.id) {
               ws.send(JSON.stringify({ type: "error", message: "Ведущий уже есть" }));
               return;
             }
             
             ws.role = "host";
             host = ws;
-            console.log(`🎙 Ведущий: ${ws.name}`);
+            console.log(`🎙 Ведущий: ${ws.name}${isReconnecting ? ' (переподключение)' : ''}`);
             
             ws.send(JSON.stringify({ 
               type: "joined_as_host", 
-              id: ws.id 
+              id: ws.id,
+              isReconnecting: isReconnecting
             }));
             
           } else {
             // 👤 Обычный игрок
-            const activeRegularPlayers = allPlayers.filter(p => p.readyState === WebSocket.OPEN);
-            
-            if (activeRegularPlayers.length >= MAX_PLAYERS) {
-              ws.send(JSON.stringify({ 
-                type: "error", 
-                message: `Лобби заполнено (максимум ${MAX_PLAYERS} игроков)` 
-              }));
-              return;
-            }
+            // Если игрок не в списке активных, добавляем
+            if (!allPlayers.includes(ws)) {
+              const activeRegularPlayers = allPlayers.filter(p => p.readyState === WebSocket.OPEN);
+              
+              if (activeRegularPlayers.length >= MAX_PLAYERS && !isReconnecting) {
+                ws.send(JSON.stringify({ 
+                  type: "error", 
+                  message: `Лобби заполнено (максимум ${MAX_PLAYERS} игроков)` 
+                }));
+                return;
+              }
 
-            allPlayers.push(ws);
-            console.log(`👤 Игрок: ${ws.name}`);
+              allPlayers.push(ws);
+            }
+            
+            console.log(`👤 Игрок: ${ws.name}${isReconnecting ? ' (переподключение)' : ''}`);
             
             ws.send(JSON.stringify({ 
               type: "joined_as_player", 
-              id: ws.id 
+              id: ws.id,
+              isReconnecting: isReconnecting
             }));
           }
 
@@ -875,7 +907,10 @@ wss.on("connection", (ws) => {
         // 🔄 Сброс игры (очистка характеристик)
         case "reset_game": {
           if (ws.role === "host") {
+            console.log("🔄 Админ сбрасывает игру...");
             gameState.started = false;
+            
+            // Сбрасываем состояние всех активных игроков
             allPlayers.forEach(p => {
               p.ready = false;
               p.characteristics = null;
@@ -885,12 +920,17 @@ wss.on("connection", (ws) => {
               host.characteristics = null;
             }
             
+            // Очищаем данные отключенных игроков
+            disconnectedPlayers.clear();
+            console.log("🗑️ Данные отключенных игроков очищены");
+            
             broadcast({
               type: "game_reset",
               message: "Игра сброшена, все карты очищены"
             });
             
             sendPlayersUpdate();
+            console.log("✅ Игра успешно сброшена");
           }
           break;
         }
@@ -907,6 +947,18 @@ wss.on("connection", (ws) => {
   // ❌ Отключение клиента
   ws.on("close", () => {
     console.log(`❌ Отключился: ${ws.name || 'Unknown'} (${ws.role})`);
+    
+    // 💾 Сохраняем данные игрока перед отключением (если игра началась)
+    if (ws.name && gameState.started) {
+      disconnectedPlayers.set(ws.name.toLowerCase(), {
+        characteristics: ws.characteristics ? JSON.parse(JSON.stringify(ws.characteristics)) : null,
+        ready: ws.ready || false,
+        role: ws.role || "player",
+        id: ws.id,
+        disconnectedAt: Date.now()
+      });
+      console.log(`💾 Данные игрока ${ws.name} сохранены для возможного переподключения`);
+    }
     
     if (ws.role === "player") {
       allPlayers = allPlayers.filter((p) => p !== ws);
