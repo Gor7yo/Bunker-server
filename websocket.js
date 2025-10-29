@@ -9,6 +9,7 @@ const wss = new WebSocket.Server({ port: 5000 }, () =>
 const MAX_PLAYERS = 5; // Увеличил до 8
 let allPlayers = [];
 let host = null;
+let adminPanel = null; // Отдельное подключение для админ-панели
 let gameState = { started: false };
 let bannedPlayers = new Set(); // Set из ID изгнанных игроков
 let disconnectedPlayers = new Map(); // Map: nickname -> {characteristics, id, role}
@@ -515,6 +516,28 @@ function sendPlayersUpdate() {
 
   console.log("📤 Игроков онлайн:", activePlayers.length, "Готовых:", readyCount);
 
+  // Отправляем обновление всем: игрокам, ведущему и админ-панели (если подключена)
+  const allConnections = [...playersList];
+  if (adminPanel && adminPanel.readyState === WebSocket.OPEN) {
+    adminPanel.send(JSON.stringify({
+      type: "players_update",
+      players: playersList.map((p) => ({
+        id: p.id,
+        name: p.name,
+        ready: p.ready,
+        role: p.role,
+        characteristics: p.characteristics || null
+      })),
+      readyCount,
+      totalPlayers,
+      regularPlayers: activePlayers.length,
+      maxRegularPlayers: MAX_PLAYERS,
+      hostConnected: !!activeHost,
+      hostReady: activeHost ? activeHost.ready : false,
+      gameStarted: gameState.started
+    }));
+  }
+
   broadcast({
     type: "players_update",
     players: playersList.map((p) => ({
@@ -619,6 +642,35 @@ wss.on("connection", (ws) => {
       const data = JSON.parse(message);
 
       switch (data.type) {
+        // 🎛️ Вход в админ-панель (отдельное подключение, не считается игроком)
+        case "join_admin_panel": {
+          // Проверяем, занята ли админ-панель
+          if (adminPanel && adminPanel.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ 
+              type: "error", 
+              message: "Админ-панель уже занята" 
+            }));
+            return;
+          }
+          
+          // Устанавливаем роль админа
+          ws.role = "admin_panel";
+          ws.name = "admin_panel";
+          adminPanel = ws;
+          
+          console.log(`🎛️ Подключение к админ-панели`);
+          
+          ws.send(JSON.stringify({ 
+            type: "joined_as_admin", 
+            id: ws.id,
+            message: "Подключение к админ-панели установлено"
+          }));
+          
+          // Отправляем текущее состояние игры
+          sendPlayersUpdate();
+          break;
+        }
+
         // 👋 Игрок вошёл
         case "join": {
           const nickname = (data.name || "").trim();
@@ -678,8 +730,8 @@ wss.on("connection", (ws) => {
             ws.name = nickname;
           }
 
-          // 🎙 Ведущий
-          if (["millisana", "admin", "host", "ведущий"].includes(nickname.toLowerCase())) {
+          // 🎙 Ведущий (только millisana, host, ведущий - НЕ admin!)
+          if (["millisana", "host", "ведущий"].includes(nickname.toLowerCase())) {
             if (host && host.readyState === WebSocket.OPEN && host.id !== ws.id) {
               ws.send(JSON.stringify({ type: "error", message: "Ведущий уже есть" }));
               return;
@@ -906,7 +958,8 @@ wss.on("connection", (ws) => {
 
         // 🔄 Сброс игры (очистка характеристик)
         case "reset_game": {
-          if (ws.role === "host") {
+          // Разрешаем сброс только админу панели или ведущему
+          if (ws.role === "admin_panel" || ws.role === "host") {
             console.log("🔄 Админ сбрасывает игру...");
             gameState.started = false;
             
@@ -949,7 +1002,8 @@ wss.on("connection", (ws) => {
     console.log(`❌ Отключился: ${ws.name || 'Unknown'} (${ws.role})`);
     
     // 💾 Сохраняем данные игрока перед отключением (если игра началась)
-    if (ws.name && gameState.started) {
+    // НЕ сохраняем для админ-панели
+    if (ws.name && gameState.started && ws.role !== "admin_panel") {
       disconnectedPlayers.set(ws.name.toLowerCase(), {
         characteristics: ws.characteristics ? JSON.parse(JSON.stringify(ws.characteristics)) : null,
         ready: ws.ready || false,
@@ -968,16 +1022,21 @@ wss.on("connection", (ws) => {
         type: "host_left",
         message: "Ведущий вышел из игры"
       });
+    } else if (ws.role === "admin_panel") {
+      adminPanel = null;
+      console.log(`🎛️ Админ-панель освобождена`);
+      // НЕ отправляем уведомления игрокам, т.к. это не влияет на игру
     }
 
-    // Уведомляем об отключении игрока
-    broadcast({
-      type: "player_left",
-      playerId: ws.id,
-      playerName: ws.name
-    });
-
-    sendPlayersUpdate();
+    // Уведомляем об отключении игрока (только если это не админ-панель)
+    if (ws.role !== "admin_panel") {
+      broadcast({
+        type: "player_left",
+        playerId: ws.id,
+        playerName: ws.name
+      });
+      sendPlayersUpdate();
+    }
   });
 
   ws.on("error", (error) => {
