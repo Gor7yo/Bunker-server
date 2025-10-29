@@ -526,7 +526,8 @@ function sendPlayersUpdate() {
         name: p.name,
         ready: p.ready,
         role: p.role,
-        characteristics: p.characteristics || null
+        characteristics: p.characteristics || null,
+        mirrorCamera: p.mirrorCamera || false
       })),
       readyCount,
       totalPlayers,
@@ -543,12 +544,13 @@ function sendPlayersUpdate() {
   broadcast({
     type: "players_update",
     players: playersList.map((p) => ({
-      id: p.id,
-      name: p.name,
-      ready: p.ready,
-      role: p.role,
-      characteristics: p.characteristics || null
-    })),
+        id: p.id,
+        name: p.name,
+        ready: p.ready,
+        role: p.role,
+        characteristics: p.characteristics || null,
+        mirrorCamera: p.mirrorCamera || false
+      })),
     readyCount,
     totalPlayers,
     regularPlayers: activePlayers.length,
@@ -725,6 +727,7 @@ wss.on("connection", (ws) => {
             ws.characteristics = disconnectedData.characteristics ? JSON.parse(JSON.stringify(disconnectedData.characteristics)) : null;
             ws.ready = disconnectedData.ready || false;
             ws.role = disconnectedData.role || "player";
+            ws.mirrorCamera = disconnectedData.mirrorCamera || false;
             
             // Удаляем из списка отключенных
             disconnectedPlayers.delete(nickname.toLowerCase());
@@ -1011,6 +1014,21 @@ wss.on("connection", (ws) => {
           break;
         }
 
+        // 🪞 Установка зеркалирования камеры
+        case "set_mirror_camera": {
+          if (!ws.name) {
+            ws.send(JSON.stringify({ type: "error", message: "Сначала введите никнейм" }));
+            return;
+          }
+          
+          ws.mirrorCamera = data.mirror || false;
+          console.log(`🪞 ${ws.name}: зеркалирование ${ws.mirrorCamera ? 'включено' : 'выключено'}`);
+          
+          // Отправляем обновление всем игрокам
+          sendPlayersUpdate();
+          break;
+        }
+
         // 🔄 Сброс игры (очистка характеристик)
         case "reset_game": {
           // Разрешаем сброс только админу панели или ведущему
@@ -1065,6 +1083,7 @@ wss.on("connection", (ws) => {
         ready: ws.ready || false,
         role: ws.role || "player",
         id: ws.id,
+        mirrorCamera: ws.mirrorCamera || false,
         disconnectedAt: Date.now()
       });
       console.log(`💾 Данные игрока ${ws.name} сохранены для возможного переподключения`);
