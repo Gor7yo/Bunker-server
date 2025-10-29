@@ -13,9 +13,10 @@ let adminPanel = null; // Отдельное подключение для ад�
 let gameState = { started: false, startTime: null };
 let bannedPlayers = new Set(); // Set из ID изгнанных игроков
 let disconnectedPlayers = new Map(); // Map: nickname -> {characteristics, id, role}
+let usedCards = {}; // Map: category -> Set of used card values (для отслеживания уникальных карт)
 
 // ============================
-// 🎲 Генерация случайных характеристик игрока
+// 🎲 Генерация случайных характеристик игрока (без повторений)
 // ============================
 function generatePlayerCharacteristics() {
   const characteristics = {};
@@ -26,19 +27,65 @@ function generatePlayerCharacteristics() {
   categories.forEach(category => {
     const categoryData = propertiesData.propertiesCategory.find(cat => cat.category === category);
     if (categoryData && categoryData.items.length > 0) {
-      const randomIndex = Math.floor(Math.random() * categoryData.items.length);
-      const selectedItem = categoryData.items[randomIndex];
+      // Инициализируем Set для категории, если его еще нет
+      if (!usedCards[category]) {
+        usedCards[category] = new Set();
+      }
       
-      characteristics[category] = {
-        value: selectedItem.value,
-        description: selectedItem.description || null,
-        experience: selectedItem.experience || null,
-        revealed: false // По умолчанию все характеристики скрыты
-      };
+      // Получаем доступные карты (неиспользованные)
+      const availableItems = categoryData.items.filter(item => !usedCards[category].has(item.value));
+      
+      if (availableItems.length === 0) {
+        // Если все карты использованы, логируем предупреждение и сбрасываем счетчик для этой категории
+        console.warn(`⚠️ Все карты категории ${category} использованы! Сбрасываем...`);
+        usedCards[category] = new Set();
+        // Используем все доступные карты заново
+        const randomIndex = Math.floor(Math.random() * categoryData.items.length);
+        const selectedItem = categoryData.items[randomIndex];
+        usedCards[category].add(selectedItem.value);
+        
+        characteristics[category] = {
+          value: selectedItem.value,
+          description: selectedItem.description || null,
+          experience: selectedItem.experience || null,
+          revealed: false
+        };
+      } else {
+        // Выбираем случайную карту из доступных
+        const randomIndex = Math.floor(Math.random() * availableItems.length);
+        const selectedItem = availableItems[randomIndex];
+        
+        // Помечаем карту как использованную
+        usedCards[category].add(selectedItem.value);
+        
+        characteristics[category] = {
+          value: selectedItem.value,
+          description: selectedItem.description || null,
+          experience: selectedItem.experience || null,
+          revealed: false // По умолчанию все характеристики скрыты
+        };
+      }
     }
   });
   
   return characteristics;
+}
+
+// ============================
+// 📝 Помечает карты игрока как использованные
+// ============================
+function markPlayerCardsAsUsed(characteristics) {
+  if (!characteristics) return;
+  
+  Object.keys(characteristics).forEach(category => {
+    const cardValue = characteristics[category]?.value;
+    if (cardValue) {
+      if (!usedCards[category]) {
+        usedCards[category] = new Set();
+      }
+      usedCards[category].add(cardValue);
+    }
+  });
 }
 
 // ============================
@@ -47,18 +94,29 @@ function generatePlayerCharacteristics() {
 function generateAllPlayerCards() {
   console.log("🎲 Генерируем карты для всех игроков...");
   
+  // Сбрасываем список использованных карт перед новой генерацией
+  usedCards = {};
+  
   // Генерируем карты для обычных игроков
   allPlayers.forEach(player => {
-    if (player.readyState === WebSocket.OPEN) {
+    if (player.readyState === WebSocket.OPEN && !player.characteristics) {
       player.characteristics = generatePlayerCharacteristics();
       console.log(`📋 Карты для ${player.name}:`, Object.keys(player.characteristics));
+    } else if (player.characteristics) {
+      // Если у игрока уже есть карты (при переподключении), помечаем их как использованные
+      markPlayerCardsAsUsed(player.characteristics);
     }
   });
   
   // Генерируем карты для ведущего
   if (host && host.readyState === WebSocket.OPEN) {
-    host.characteristics = generatePlayerCharacteristics();
-    console.log(`📋 Карты для ведущего ${host.name}:`, Object.keys(host.characteristics));
+    if (!host.characteristics) {
+      host.characteristics = generatePlayerCharacteristics();
+      console.log(`📋 Карты для ведущего ${host.name}:`, Object.keys(host.characteristics));
+    } else {
+      // Если у хоста уже есть карты (при переподключении), помечаем их как использованные
+      markPlayerCardsAsUsed(host.characteristics);
+    }
   }
 }
 
@@ -729,6 +787,12 @@ wss.on("connection", (ws) => {
             ws.role = disconnectedData.role || "player";
             ws.mirrorCamera = disconnectedData.mirrorCamera || false;
             
+            // Помечаем восстановленные карты как использованные, чтобы они не дублировались
+            if (ws.characteristics) {
+              markPlayerCardsAsUsed(ws.characteristics);
+              console.log(`📝 Карты игрока ${nickname} помечены как использованные`);
+            }
+            
             // Удаляем из списка отключенных
             disconnectedPlayers.delete(nickname.toLowerCase());
             
@@ -766,6 +830,8 @@ wss.on("connection", (ws) => {
               if (!ws.characteristics) {
                 console.log(`🎲 Генерируем карты для ведущего (заход во время игры)`);
                 ws.characteristics = generatePlayerCharacteristics();
+                // Помечаем карты как использованные
+                markPlayerCardsAsUsed(ws.characteristics);
               }
               
               ws.send(JSON.stringify({
@@ -811,6 +877,8 @@ wss.on("connection", (ws) => {
               if (!ws.characteristics) {
                 console.log(`🎲 Генерируем карты для игрока ${ws.name} (заход во время игры)`);
                 ws.characteristics = generatePlayerCharacteristics();
+                // Помечаем карты как использованные
+                markPlayerCardsAsUsed(ws.characteristics);
                 // Отправляем обновление сразу
                 sendPlayersUpdate();
               }
@@ -1050,6 +1118,10 @@ wss.on("connection", (ws) => {
             // Очищаем данные отключенных игроков
             disconnectedPlayers.clear();
             console.log("🗑️ Данные отключенных игроков очищены");
+            
+            // Очищаем список использованных карт
+            usedCards = {};
+            console.log("🗑️ Список использованных карт очищен");
             
             broadcast({
               type: "game_reset",
