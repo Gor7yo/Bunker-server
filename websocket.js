@@ -1082,6 +1082,48 @@ wss.on("connection", (ws) => {
           break;
         }
 
+        // 🦵 Кик игрока админом панели (без бана, можно перезаходить)
+        case "kick_player": {
+          // Разрешаем кик только админ-панели или ведущему
+          if (ws.role === "admin_panel" || ws.role === "host") {
+            const targetPlayerId = data.playerId;
+            const allConnections = [...allPlayers, host].filter(Boolean);
+            const targetPlayer = allConnections.find(p => p && p.id === targetPlayerId);
+
+            if (!targetPlayer) {
+              ws.send(JSON.stringify({ type: "error", message: "Игрок не найден" }));
+              break;
+            }
+            if (targetPlayer.role === "host") {
+              ws.send(JSON.stringify({ type: "error", message: "Нельзя кикнуть ведущего" }));
+              break;
+            }
+
+            try {
+              // Уведомляем цель, что её кикнули
+              if (targetPlayer.readyState === WebSocket.OPEN) {
+                targetPlayer.send(JSON.stringify({ type: "kicked", message: "Вы были кикнуты администратором. Вы можете переподключиться." }));
+              }
+            } catch (e) {
+              console.warn("⚠️ Не удалось отправить уведомление о кике:", e);
+            }
+
+            // Закрываем соединение; если игра идёт, onclose сохранит данные для переподключения
+            try {
+              targetPlayer.close(4000, "Kicked by admin");
+            } catch (_) {}
+
+            // Сообщаем всем
+            broadcast({
+              type: "player_kicked",
+              playerId: targetPlayerId,
+              playerName: targetPlayer.name
+            });
+            sendPlayersUpdate();
+          }
+          break;
+        }
+
         // 🪞 Установка зеркалирования камеры
         case "set_mirror_camera": {
           if (!ws.name) {
