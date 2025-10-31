@@ -26,6 +26,7 @@ let votingState = {
   votes: new Map(), // Map: voterId -> targetPlayerId (кто за кого проголосовал)
   voteCounts: {} // Объект: targetPlayerId -> количество голосов
 };
+let votingHistory = []; // История голосований: [{timestamp, results: [{playerId, name, votes}]}]
 
 // ============================
 // 🎲 Генерация случайных характеристик игрока (без повторений)
@@ -692,21 +693,51 @@ function checkVotingComplete() {
       
       console.log(`🗳️ Результаты голосования: ${candidates.length} кандидат(ов) с ${maxVotes} голос(ами)`);
       
+      // Собираем полные результаты голосования (все игроки с количеством голосов)
+      const allConnections = [...allPlayers, host];
+      const allVotingResults = allConnections
+        .filter(p => p && p.role !== "host")
+        .map(player => ({
+          id: player.id,
+          name: player.name,
+          votes: votingState.voteCounts[player.id] || 0
+        }))
+        .sort((a, b) => b.votes - a.votes); // Сортируем от самых проголосованных до наименее
+      
+      // Сохраняем в историю
+      const historyEntry = {
+        timestamp: Date.now(),
+        results: allVotingResults,
+        candidates: candidates
+      };
+      votingHistory.push(historyEntry);
+      
       // Отправляем результаты всем
       broadcast({
         type: "voting_completed",
         message: `Голосование завершено. ${candidates.length === 1 ? 'Кандидат на вылет' : 'Кандидаты на вылет'}: ${candidates.map(c => c.name).join(', ')}`,
-        candidates: candidates
+        candidates: candidates,
+        allResults: allVotingResults // Полные результаты для модального окна
       });
+      
+      // Отправляем полные результаты хосту для модального окна
+      const hostConnection = host && host.readyState === WebSocket.OPEN ? host : null;
+      if (hostConnection) {
+        hostConnection.send(JSON.stringify({
+          type: "voting_results",
+          allResults: allVotingResults,
+          candidates: candidates
+        }));
+      }
       
       // Если несколько кандидатов - хост должен выбрать
       if (candidates.length > 1) {
-        const hostConnection = host && host.readyState === WebSocket.OPEN ? host : null;
         if (hostConnection) {
           hostConnection.send(JSON.stringify({
             type: "voting_tie",
             message: "Несколько игроков получили одинаковое количество голосов",
-            candidates: candidates
+            candidates: candidates,
+            allResults: allVotingResults
           }));
         }
       } else if (candidates.length === 1) {
@@ -1468,6 +1499,7 @@ wss.on("connection", (ws) => {
             votingState.active = false;
             votingState.votes.clear();
             votingState.voteCounts = {};
+            votingHistory = []; // Сбрасываем историю голосований
             
             // Сбрасываем состояние всех активных игроков
             allPlayers.forEach(p => {
