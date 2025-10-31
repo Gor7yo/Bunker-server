@@ -1161,9 +1161,9 @@ wss.on("connection", (ws) => {
 
         // ✅ Игра готова к началу (админ нажал "Начать")
         case "game_ready": {
-          // Разрешаем только ведущему
-          if (ws.role === "host") {
-            console.log("✅ Админ нажал 'Начать', игра готова!");
+          // Разрешаем ведущему или админ-панели
+          if (ws.role === "host" || ws.role === "admin_panel") {
+            console.log(`✅ ${ws.role === "host" ? "Ведущий" : "Админ-панель"} нажал 'Начать', игра готова!`);
             gameState.ready = true;
             
             broadcast({
@@ -1173,7 +1173,7 @@ wss.on("connection", (ws) => {
             
             sendPlayersUpdate();
           } else {
-            ws.send(JSON.stringify({ type: "error", message: "Только ведущий может начать игру" }));
+            ws.send(JSON.stringify({ type: "error", message: "Только ведущий или админ-панель могут начать игру" }));
           }
           break;
         }
