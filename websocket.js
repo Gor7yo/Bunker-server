@@ -1220,11 +1220,13 @@ wss.on("connection", (ws) => {
             console.log(`🔄 Раунд изменен на: ${newRound}`);
             
             // Отправляем всем уведомление о смене раунда
+            console.log(`📤 Отправляем round_changed всем клиентам: раунд ${newRound}`);
             broadcast({
               type: "round_changed",
               round: newRound,
               totalRounds: gameState.totalRounds
             });
+            console.log(`✅ round_changed отправлен`);
             
             sendPlayersUpdate();
           } else {
