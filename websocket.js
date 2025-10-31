@@ -1161,9 +1161,14 @@ wss.on("connection", (ws) => {
 
         // ✅ Игра готова к началу (админ нажал "Начать")
         case "game_ready": {
+          console.log(`🔍 Запрос game_ready от: role=${ws.role}, name=${ws.name}, id=${ws.id}`);
+          console.log(`🔍 adminPanel:`, adminPanel ? {id: adminPanel.id, role: adminPanel.role} : 'null');
+          console.log(`🔍 ws === adminPanel:`, ws === adminPanel);
+          
           // Разрешаем ведущему или админ-панели
-          if (ws.role === "host" || ws.role === "admin_panel") {
-            console.log(`✅ ${ws.role === "host" ? "Ведущий" : "Админ-панель"} нажал 'Начать', игра готова!`);
+          if (ws.role === "host" || ws.role === "admin_panel" || ws === adminPanel) {
+            const who = ws.role === "host" ? "Ведущий" : (ws === adminPanel ? "Админ-панель" : "Админ");
+            console.log(`✅ ${who} нажал 'Начать', игра готова!`);
             gameState.ready = true;
             
             broadcast({
@@ -1173,7 +1178,8 @@ wss.on("connection", (ws) => {
             
             sendPlayersUpdate();
           } else {
-            ws.send(JSON.stringify({ type: "error", message: "Только ведущий или админ-панель могут начать игру" }));
+            console.error(`❌ Отказ: role=${ws.role}, ожидалось "host" или "admin_panel"`);
+            ws.send(JSON.stringify({ type: "error", message: `Нет доступа. Ваша роль: ${ws.role || 'не определена'}` }));
           }
           break;
         }
