@@ -10,7 +10,7 @@ const MAX_PLAYERS = 8; // Увеличил до 8
 let allPlayers = [];
 let host = null;
 let adminPanel = null; // Отдельное подключение для админ-панели
-let gameState = { started: false, startTime: null };
+let gameState = { started: false, startTime: null, ready: false }; // ready - админ нажал "Начать"
 let bannedPlayers = new Set(); // Set из ID изгнанных игроков
 let disconnectedPlayers = new Map(); // Map: nickname -> {characteristics, id, role}
 let usedCards = {}; // Map: category -> Set of used card values (для отслеживания уникальных карт)
@@ -595,7 +595,8 @@ function sendPlayersUpdate() {
       hostReady: activeHost ? activeHost.ready : false,
       gameStarted: gameState.started,
       gameStartTime: gameState.startTime,
-      gameElapsedTime: gameState.started && gameState.startTime ? Date.now() - gameState.startTime : 0
+      gameElapsedTime: gameState.started && gameState.startTime ? Date.now() - gameState.startTime : 0,
+      gameReady: gameState.ready
     }));
   }
 
@@ -617,7 +618,8 @@ function sendPlayersUpdate() {
     hostReady: activeHost ? activeHost.ready : false,
     gameStarted: gameState.started,
     gameStartTime: gameState.startTime,
-    gameElapsedTime: gameState.started && gameState.startTime ? Date.now() - gameState.startTime : 0
+    gameElapsedTime: gameState.started && gameState.startTime ? Date.now() - gameState.startTime : 0,
+    gameReady: gameState.ready
   });
 }
 
@@ -632,6 +634,7 @@ function checkAllReady() {
     if (gameState.started) {
       gameState.started = false;
       gameState.startTime = null; // Сбрасываем время если игра была остановлена
+      gameState.ready = false; // Сбрасываем готовность
     }
     return;
   }
@@ -642,6 +645,7 @@ function checkAllReady() {
   if (allReady && !gameState.started) {
     gameState.started = true;
     gameState.startTime = Date.now(); // Запоминаем время начала игры
+    gameState.ready = false; // Сбрасываем готовность (админ еще не нажал "Начать")
     console.log("🎮 Игра началась! Генерируем карты и устанавливаем WebRTC соединения...");
     
     // Генерируем карты для всех игроков
@@ -883,10 +887,18 @@ wss.on("connection", (ws) => {
                 sendPlayersUpdate();
               }
               
-              ws.send(JSON.stringify({
-                type: "game_started",
-                message: "Игра уже началась, вы можете присоединиться"
-              }));
+              // Если игра уже готова (админ нажал "Начать"), не показываем экран "Подключение..."
+              if (gameState.ready) {
+                ws.send(JSON.stringify({
+                  type: "game_ready",
+                  message: "Игра уже готова, присоединяйтесь"
+                }));
+              } else {
+                ws.send(JSON.stringify({
+                  type: "game_started",
+                  message: "Игра уже началась, вы можете присоединиться"
+                }));
+              }
             }
           }
 
@@ -920,10 +932,18 @@ wss.on("connection", (ws) => {
           // Если игра уже началась и игрок стал готов, сразу отправляем ему состояние игры
           if (data.ready && gameState.started) {
             console.log(`🎮 Игрок ${ws.name} готов и игра уже началась - отправляем состояние`);
-            ws.send(JSON.stringify({
-              type: "game_started",
-              message: "Игра уже началась"
-            }));
+            // Если игра уже готова (админ нажал "Начать"), не показываем экран "Подключение..."
+            if (gameState.ready) {
+              ws.send(JSON.stringify({
+                type: "game_ready",
+                message: "Игра уже готова"
+              }));
+            } else {
+              ws.send(JSON.stringify({
+                type: "game_started",
+                message: "Игра уже началась"
+              }));
+            }
           }
 
           sendPlayersUpdate();
@@ -1139,6 +1159,25 @@ wss.on("connection", (ws) => {
           break;
         }
 
+        // ✅ Игра готова к началу (админ нажал "Начать")
+        case "game_ready": {
+          // Разрешаем только ведущему
+          if (ws.role === "host") {
+            console.log("✅ Админ нажал 'Начать', игра готова!");
+            gameState.ready = true;
+            
+            broadcast({
+              type: "game_ready",
+              message: "Игра готова к началу"
+            });
+            
+            sendPlayersUpdate();
+          } else {
+            ws.send(JSON.stringify({ type: "error", message: "Только ведущий может начать игру" }));
+          }
+          break;
+        }
+
         // 🔄 Сброс игры (очистка характеристик)
         case "reset_game": {
           // Разрешаем сброс только админу панели или ведущему
@@ -1146,6 +1185,7 @@ wss.on("connection", (ws) => {
             console.log("🔄 Админ сбрасывает игру...");
             gameState.started = false;
             gameState.startTime = null; // Сбрасываем время начала игры
+            gameState.ready = false; // Сбрасываем готовность игры
             
             // Сбрасываем состояние всех активных игроков
             allPlayers.forEach(p => {
