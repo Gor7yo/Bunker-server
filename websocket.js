@@ -18,6 +18,7 @@ let gameState = {
   totalRounds: 5 // По умолчанию 5 раундов
 };
 let bannedPlayers = new Set(); // Set из ID изгнанных игроков
+let highlightedPlayerId = null; // ID игрока с зеленой рамкой (может быть только один)
 let disconnectedPlayers = new Map(); // Map: nickname -> {characteristics, id, role}
 let usedCards = {}; // Map: category -> Set of used card values (для отслеживания уникальных карт)
 
@@ -604,7 +605,8 @@ function sendPlayersUpdate() {
       gameElapsedTime: gameState.started && gameState.startTime ? Date.now() - gameState.startTime : 0,
       gameReady: gameState.ready,
       currentRound: gameState.currentRound,
-      totalRounds: gameState.totalRounds
+      totalRounds: gameState.totalRounds,
+      highlightedPlayerId: highlightedPlayerId
     }));
   }
 
@@ -627,9 +629,10 @@ function sendPlayersUpdate() {
     gameStarted: gameState.started,
     gameStartTime: gameState.startTime,
     gameElapsedTime: gameState.started && gameState.startTime ? Date.now() - gameState.startTime : 0,
-    gameReady: gameState.ready,
-    currentRound: gameState.currentRound,
-    totalRounds: gameState.totalRounds
+      gameReady: gameState.ready,
+      currentRound: gameState.currentRound,
+      totalRounds: gameState.totalRounds,
+      highlightedPlayerId: highlightedPlayerId
   });
 }
 
@@ -1219,6 +1222,12 @@ wss.on("connection", (ws) => {
             gameState.currentRound = newRound;
             console.log(`🔄 Раунд изменен на: ${newRound}`);
             
+            // Сбрасываем зеленую рамку при смене раунда
+            if (highlightedPlayerId) {
+              highlightedPlayerId = null;
+              console.log(`🔄 Зеленая рамка сброшена при смене раунда`);
+            }
+            
             // Отправляем всем уведомление о смене раунда
             console.log(`📤 Отправляем round_changed всем клиентам: раунд ${newRound}`);
             broadcast({
@@ -1235,6 +1244,35 @@ wss.on("connection", (ws) => {
           break;
         }
 
+        // 🟢 Переключение зеленой рамки игрока
+        case "toggle_player_highlight": {
+          // Разрешаем только ведущему
+          if (ws.role === "host") {
+            const targetPlayerId = data.playerId;
+            
+            if (!targetPlayerId) {
+              ws.send(JSON.stringify({ type: "error", message: "Не указан ID игрока" }));
+              return;
+            }
+            
+            // Если нажимаем на того же игрока - сбрасываем
+            if (highlightedPlayerId === targetPlayerId) {
+              highlightedPlayerId = null;
+              console.log(`🟢 Зеленая рамка сброшена для игрока ${targetPlayerId}`);
+            } else {
+              // Иначе устанавливаем новому игроку (предыдущий автоматически сбросится)
+              highlightedPlayerId = targetPlayerId;
+              console.log(`🟢 Зеленая рамка установлена для игрока ${targetPlayerId}`);
+            }
+            
+            // Отправляем обновление всем
+            sendPlayersUpdate();
+          } else {
+            ws.send(JSON.stringify({ type: "error", message: "Только ведущий может управлять выделением игроков" }));
+          }
+          break;
+        }
+
         // 🔄 Сброс игры (очистка характеристик)
         case "reset_game": {
           // Разрешаем сброс только админу панели или ведущему
@@ -1244,6 +1282,7 @@ wss.on("connection", (ws) => {
             gameState.startTime = null; // Сбрасываем время начала игры
             gameState.ready = false; // Сбрасываем готовность игры
             gameState.currentRound = 0; // Сбрасываем раунд
+            highlightedPlayerId = null; // Сбрасываем зеленую рамку
             
             // Сбрасываем состояние всех активных игроков
             allPlayers.forEach(p => {
