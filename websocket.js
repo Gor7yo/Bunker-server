@@ -1427,6 +1427,34 @@ wss.on("connection", (ws) => {
           break;
         }
 
+        // 🗳️ Отмена голосования
+        case "cancel_voting": {
+          // Разрешаем только ведущему
+          if (ws.role === "host") {
+            if (!votingState.active) {
+              ws.send(JSON.stringify({ type: "error", message: "Голосование не активно" }));
+              return;
+            }
+            
+            // Сбрасываем голосование
+            votingState.active = false;
+            votingState.votes.clear();
+            votingState.voteCounts = {};
+            
+            console.log(`🗳️ Голосование на вылет отменено`);
+            
+            broadcast({
+              type: "voting_cancelled",
+              message: "Голосование на вылет отменено ведущим"
+            });
+            
+            sendPlayersUpdate();
+          } else {
+            ws.send(JSON.stringify({ type: "error", message: "Только ведущий может отменить голосование" }));
+          }
+          break;
+        }
+
         // 🗳️ Голос игрока за вылет другого игрока
         case "vote_to_kick": {
           if (!votingState.active) {
