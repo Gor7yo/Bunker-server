@@ -10,7 +10,13 @@ const MAX_PLAYERS = 8; // Увеличил до 8
 let allPlayers = [];
 let host = null;
 let adminPanel = null; // Отдельное подключение для админ-панели
-let gameState = { started: false, startTime: null, ready: false }; // ready - админ нажал "Начать"
+let gameState = { 
+  started: false, 
+  startTime: null, 
+  ready: false, // ready - админ нажал "Начать"
+  currentRound: 0,
+  totalRounds: 5 // По умолчанию 5 раундов
+};
 let bannedPlayers = new Set(); // Set из ID изгнанных игроков
 let disconnectedPlayers = new Map(); // Map: nickname -> {characteristics, id, role}
 let usedCards = {}; // Map: category -> Set of used card values (для отслеживания уникальных карт)
@@ -596,7 +602,9 @@ function sendPlayersUpdate() {
       gameStarted: gameState.started,
       gameStartTime: gameState.startTime,
       gameElapsedTime: gameState.started && gameState.startTime ? Date.now() - gameState.startTime : 0,
-      gameReady: gameState.ready
+      gameReady: gameState.ready,
+      currentRound: gameState.currentRound,
+      totalRounds: gameState.totalRounds
     }));
   }
 
@@ -619,7 +627,9 @@ function sendPlayersUpdate() {
     gameStarted: gameState.started,
     gameStartTime: gameState.startTime,
     gameElapsedTime: gameState.started && gameState.startTime ? Date.now() - gameState.startTime : 0,
-    gameReady: gameState.ready
+    gameReady: gameState.ready,
+    currentRound: gameState.currentRound,
+    totalRounds: gameState.totalRounds
   });
 }
 
@@ -646,6 +656,7 @@ function checkAllReady() {
     gameState.started = true;
     gameState.startTime = Date.now(); // Запоминаем время начала игры
     gameState.ready = false; // Сбрасываем готовность (админ еще не нажал "Начать")
+    gameState.currentRound = 0; // Сбрасываем раунд при начале игры
     console.log("🎮 Игра началась! Генерируем карты и устанавливаем WebRTC соединения...");
     
     // Генерируем карты для всех игроков
@@ -1178,6 +1189,50 @@ wss.on("connection", (ws) => {
           break;
         }
 
+        // 🎯 Установка количества раундов
+        case "set_total_rounds": {
+          // Разрешаем только ведущему или админ-панели
+          if (ws.role === "host" || ws.role === "admin_panel") {
+            const newTotalRounds = parseInt(data.totalRounds) || 5;
+            if (newTotalRounds < 1) {
+              ws.send(JSON.stringify({ type: "error", message: "Количество раундов должно быть больше 0" }));
+              return;
+            }
+            gameState.totalRounds = newTotalRounds;
+            console.log(`🎯 Количество раундов установлено: ${newTotalRounds}`);
+            sendPlayersUpdate();
+          } else {
+            ws.send(JSON.stringify({ type: "error", message: "Только ведущий или админ-панель могут устанавливать количество раундов" }));
+          }
+          break;
+        }
+
+        // 🔄 Переключение раунда
+        case "change_round": {
+          // Разрешаем только ведущему или админ-панели
+          if (ws.role === "host" || ws.role === "admin_panel") {
+            const newRound = parseInt(data.round) || 1;
+            if (newRound < 1 || newRound > gameState.totalRounds) {
+              ws.send(JSON.stringify({ type: "error", message: `Раунд должен быть от 1 до ${gameState.totalRounds}` }));
+              return;
+            }
+            gameState.currentRound = newRound;
+            console.log(`🔄 Раунд изменен на: ${newRound}`);
+            
+            // Отправляем всем уведомление о смене раунда
+            broadcast({
+              type: "round_changed",
+              round: newRound,
+              totalRounds: gameState.totalRounds
+            });
+            
+            sendPlayersUpdate();
+          } else {
+            ws.send(JSON.stringify({ type: "error", message: "Только ведущий или админ-панель могут переключать раунд" }));
+          }
+          break;
+        }
+
         // 🔄 Сброс игры (очистка характеристик)
         case "reset_game": {
           // Разрешаем сброс только админу панели или ведущему
@@ -1186,6 +1241,7 @@ wss.on("connection", (ws) => {
             gameState.started = false;
             gameState.startTime = null; // Сбрасываем время начала игры
             gameState.ready = false; // Сбрасываем готовность игры
+            gameState.currentRound = 0; // Сбрасываем раунд
             
             // Сбрасываем состояние всех активных игроков
             allPlayers.forEach(p => {
