@@ -673,10 +673,31 @@ function checkVotingComplete() {
     if (maxVotes === 0) {
       // Никто не получил голосов
       votingState.active = false;
+      
+      // Собираем полные результаты голосования (все игроки с количеством голосов)
+      const allConnections = [...allPlayers, host];
+      const allVotingResults = allConnections
+        .filter(p => p && p.role !== "host")
+        .map(player => ({
+          id: player.id,
+          name: player.name,
+          votes: 0
+        }))
+        .sort((a, b) => b.votes - a.votes); // Сортируем от самых проголосованных до наименее
+      
+      // Сохраняем в историю
+      const historyEntry = {
+        timestamp: Date.now(),
+        results: allVotingResults,
+        candidates: []
+      };
+      votingHistory.push(historyEntry);
+      
       broadcast({
         type: "voting_completed",
-        message: "Голосование завершено. Никто не получил голосов.",
-        candidates: []
+        message: "Голосование на вылет завершено. Никто не получил голосов.",
+        candidates: [],
+        allResults: allVotingResults
       });
     } else {
       // Находим всех игроков с максимальным количеством голосов
@@ -712,23 +733,23 @@ function checkVotingComplete() {
       };
       votingHistory.push(historyEntry);
       
+      // Формируем сообщение о результатах
+      let resultMessage = "Голосование на вылет завершено. ";
+      if (maxVotes === 0) {
+        resultMessage += "Никто не получил голосов.";
+      } else if (candidates.length === 1) {
+        resultMessage += `Кандидат на вылет: ${candidates[0].name} (${maxVotes} голос(ов)).`;
+      } else if (candidates.length > 1) {
+        resultMessage += `Кандидаты на вылет: ${candidates.map(c => `${c.name} (${c.votes} голос(ов))`).join(', ')}.`;
+      }
+      
       // Отправляем результаты всем
       broadcast({
         type: "voting_completed",
-        message: `Голосование завершено. ${candidates.length === 1 ? 'Кандидат на вылет' : 'Кандидаты на вылет'}: ${candidates.map(c => c.name).join(', ')}`,
+        message: resultMessage,
         candidates: candidates,
         allResults: allVotingResults // Полные результаты для модального окна
       });
-      
-      // Отправляем полные результаты хосту для модального окна
-      const hostConnection = host && host.readyState === WebSocket.OPEN ? host : null;
-      if (hostConnection) {
-        hostConnection.send(JSON.stringify({
-          type: "voting_results",
-          allResults: allVotingResults,
-          candidates: candidates
-        }));
-      }
       
       // Если несколько кандидатов - хост должен выбрать
       if (candidates.length > 1) {
