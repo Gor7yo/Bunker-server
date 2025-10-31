@@ -657,7 +657,8 @@ function checkVotingComplete() {
   const activePlayers = allPlayers.filter(p => 
     p.readyState === WebSocket.OPEN && 
     p.role !== "host" &&
-    p.ready
+    p.ready &&
+    !bannedPlayers.has(p.id) // Исключаем изгнанных игроков
   );
   
   // Все активные игроки проголосовали
@@ -1438,6 +1439,12 @@ wss.on("connection", (ws) => {
             return;
           }
           
+          // Проверяем, что голосующий игрок не изгнан
+          if (bannedPlayers.has(ws.id)) {
+            ws.send(JSON.stringify({ type: "error", message: "Изгнанные игроки не могут голосовать" }));
+            return;
+          }
+          
           const targetPlayerId = data.targetPlayerId;
           if (!targetPlayerId) {
             ws.send(JSON.stringify({ type: "error", message: "Не указан ID игрока" }));
@@ -1455,6 +1462,12 @@ wss.on("connection", (ws) => {
           const targetPlayer = allConnections.find(p => p && p.id === targetPlayerId);
           if (!targetPlayer || targetPlayer.role === "host") {
             ws.send(JSON.stringify({ type: "error", message: "Неверный игрок для голосования" }));
+            return;
+          }
+          
+          // Проверяем, что цель не изгнана
+          if (bannedPlayers.has(targetPlayerId)) {
+            ws.send(JSON.stringify({ type: "error", message: "Нельзя голосовать за изгнанного игрока" }));
             return;
           }
           
