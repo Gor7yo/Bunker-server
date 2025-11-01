@@ -9,21 +9,35 @@ const wss = new WebSocket.Server({ port: 5000 }, () =>
 );
 
 // Инициализация Mediasoup (РЕКОМЕНДУЕТСЯ для 8 игроков)
+// ВАЖНО: Mediasoup требует компиляции нативных модулей (C++).
+// На Render.com часто не работает из-за ограничений окружения.
+// Лучше запускать Mediasoup на отдельном сервере (Selectel) через mediasoup-standalone.js
 const USE_MEDIASOUP = process.env.USE_MEDIASOUP === 'true';
 let mediasoupHandler = null;
 
 if (USE_MEDIASOUP) {
-  try {
-    mediasoupHandler = new MediasoupHandler({
-      announcedIp: process.env.MEDIASOUP_ANNOUNCED_IP || undefined
-    });
-    console.log("✅ Mediasoup Handler инициализирован (используется Mediasoup Media Server)");
-  } catch (error) {
-    console.error("⚠️ Не удалось инициализировать Mediasoup, используем P2P режим:", error.message);
-    mediasoupHandler = null;
-  }
+  // Пытаемся инициализировать Mediasoup, но не блокируем запуск сервера при ошибке
+  (async () => {
+    try {
+      mediasoupHandler = new MediasoupHandler({
+        announcedIp: process.env.MEDIASOUP_ANNOUNCED_IP || undefined
+      });
+      console.log("✅ Mediasoup Handler инициализирован (используется Mediasoup Media Server)");
+    } catch (error) {
+      console.error("⚠️ Не удалось инициализировать Mediasoup:", error.message);
+      if (error.message.includes('ENOENT') || error.message.includes('spawn') || error.message.includes('worker')) {
+        console.error("💡 ПРОБЛЕМА: Mediasoup worker не найден или не скомпилирован");
+        console.error("💡 РЕШЕНИЕ 1: Запустите Mediasoup на отдельном сервере (Selectel) через mediasoup-standalone.js");
+        console.error("💡 РЕШЕНИЕ 2: Отключите USE_MEDIASOUP=true для использования P2P режима");
+        console.error("💡 P2P режим будет работать с оптимизациями для 4-6 игроков");
+      }
+      mediasoupHandler = null;
+    }
+  })();
 } else {
   console.log("ℹ️ Mediasoup отключен, используется P2P режим. Для включения установите USE_MEDIASOUP=true");
+  console.log("💡 ВНИМАНИЕ: Mediasoup на Render.com может не работать из-за ограничений компиляции");
+  console.log("💡 Рекомендуется запускать Mediasoup на отдельном сервере (Selectel)");
 }
 
 // Инициализация Kurento (опционально, если не используем Mediasoup)

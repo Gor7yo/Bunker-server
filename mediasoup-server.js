@@ -22,6 +22,8 @@ class MediasoupHandler {
       console.log('🔧 Инициализация Mediasoup Worker...');
 
       // Создаем медиа-воркер
+      // ВАЖНО: Это требует скомпилированного mediasoup-worker
+      // На Render.com может не работать - используйте mediasoup-standalone.js на отдельном сервере
       this.worker = await mediasoup.createWorker({
         logLevel: 'warn',
         logTags: ['info', 'ice', 'dtls', 'rtp', 'rtcp', 'srtp'],
@@ -29,6 +31,11 @@ class MediasoupHandler {
         rtcMaxPort: 49999,
         dtlsCertificateFile: undefined,
         dtlsPrivateKeyFile: undefined
+      }).catch((error) => {
+        console.error('❌ Ошибка создания Mediasoup worker:', error.message);
+        console.error('💡 Worker файл не найден или не скомпилирован');
+        console.error('💡 Решение: Запустите Mediasoup на отдельном сервере (Selectel)');
+        throw error;
       });
 
       this.worker.on('died', () => {
