@@ -803,7 +803,7 @@ function checkVotingComplete() {
 // ============================
 // ✅ Проверяем: все ли готовы, и можно ли стартовать
 // ============================
-function checkAllReady() {
+async function checkAllReady() {
   const activePlayers = allPlayers.filter(p => p.readyState === WebSocket.OPEN);
   const activeHost = host && host.readyState === WebSocket.OPEN ? host : null;
 
@@ -832,26 +832,36 @@ function checkAllReady() {
     // Подключаем всех игроков к Mediasoup SFU
     const allConnections = [...allPlayers, host].filter(p => p && p.readyState === WebSocket.OPEN);
     
-    // Отправляем RTP capabilities всем игрокам
-    const rtpCapabilities = mediasoupServer.getRouterRtpCapabilities();
-    
-    allConnections.forEach(async (player) => {
-      try {
-        // Подключаем игрока к Mediasoup
-        const transportInfo = await mediasoupServer.connectPlayer(player.id);
-        
-        // Отправляем игроку информацию для подключения к Mediasoup
-        player.send(JSON.stringify({
-          type: "mediasoup_connect",
-          rtpCapabilities: rtpCapabilities,
-          sendTransport: transportInfo.sendTransport,
-          recvTransport: transportInfo.recvTransport,
-        }));
-        console.log(`✅ Игрок ${player.name} (${player.id}) подключен к Mediasoup SFU`);
-      } catch (error) {
-        console.error(`❌ Ошибка подключения игрока ${player.name} к Mediasoup:`, error);
-      }
-    });
+    try {
+      // Отправляем RTP capabilities всем игрокам
+      const rtpCapabilities = await mediasoupServer.getRouterRtpCapabilities();
+      
+      allConnections.forEach(async (player) => {
+        try {
+          // Подключаем игрока к Mediasoup
+          const transportInfo = await mediasoupServer.connectPlayer(player.id);
+          
+          // Отправляем игроку информацию для подключения к Mediasoup
+          player.send(JSON.stringify({
+            type: "mediasoup_connect",
+            rtpCapabilities: rtpCapabilities,
+            sendTransport: transportInfo.sendTransport,
+            recvTransport: transportInfo.recvTransport,
+          }));
+          console.log(`✅ Игрок ${player.name} (${player.id}) подключен к Mediasoup SFU`);
+        } catch (error) {
+          console.error(`❌ Ошибка подключения игрока ${player.name} к Mediasoup:`, error);
+          console.log(`⚠️ Игрок ${player.name} будет использовать mesh топологию вместо SFU`);
+        }
+      });
+    } catch (error) {
+      console.error('❌ Mediasoup недоступен:', error);
+      console.log('⚠️ Все игроки будут использовать mesh топологию вместо SFU');
+      broadcast({
+        type: "game_message",
+        message: "Mediasoup SFU недоступен, используется mesh топология"
+      });
+    }
     
     broadcast({ 
       type: "game_started",
