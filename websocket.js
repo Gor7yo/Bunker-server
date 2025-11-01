@@ -2,13 +2,32 @@
 const WebSocket = require("ws");
 const propertiesData = require("./properties.json");
 const KurentoHandler = require("./kurento-handler");
+const MediasoupHandler = require("./mediasoup-server");
 
 const wss = new WebSocket.Server({ port: 5000 }, () =>
   console.log("✅ Сервер запущен на порту 5000")
 );
 
-// Инициализация Kurento (опционально, можно отключить через переменную окружения)
-const USE_KURENTO = process.env.USE_KURENTO === 'true';
+// Инициализация Mediasoup (РЕКОМЕНДУЕТСЯ для 8 игроков)
+const USE_MEDIASOUP = process.env.USE_MEDIASOUP === 'true';
+let mediasoupHandler = null;
+
+if (USE_MEDIASOUP) {
+  try {
+    mediasoupHandler = new MediasoupHandler({
+      announcedIp: process.env.MEDIASOUP_ANNOUNCED_IP || undefined
+    });
+    console.log("✅ Mediasoup Handler инициализирован (используется Mediasoup Media Server)");
+  } catch (error) {
+    console.error("⚠️ Не удалось инициализировать Mediasoup, используем P2P режим:", error.message);
+    mediasoupHandler = null;
+  }
+} else {
+  console.log("ℹ️ Mediasoup отключен, используется P2P режим. Для включения установите USE_MEDIASOUP=true");
+}
+
+// Инициализация Kurento (опционально, если не используем Mediasoup)
+const USE_KURENTO = process.env.USE_KURENTO === 'true' && !USE_MEDIASOUP;
 let kurentoHandler = null;
 
 if (USE_KURENTO) {
@@ -29,8 +48,6 @@ if (USE_KURENTO) {
     console.error("⚠️ Не удалось инициализировать Kurento, используем P2P режим:", error.message);
     kurentoHandler = null;
   }
-} else {
-  console.log("ℹ️ Kurento отключен, используется P2P режим. Для включения установите USE_KURENTO=true");
 }
 
 const MAX_PLAYERS = 8; // Увеличил до 8
@@ -1233,11 +1250,190 @@ wss.on("connection", (ws) => {
           break;
         }
 
-        // 📡 WebRTC сигналы - УЛУЧШЕННАЯ ВЕРСИЯ (P2P режим, используется если Kurento не включен)
+        // 🎬 Mediasoup: получение RTP capabilities
+        case "mediasoup_get_rtp_capabilities": {
+          if (!USE_MEDIASOUP || !mediasoupHandler || !mediasoupHandler.isReady) {
+            ws.send(JSON.stringify({ type: "error", message: "Mediasoup не доступен" }));
+            return;
+          }
+
+          const rtpCapabilities = mediasoupHandler.getRtpCapabilities();
+          ws.send(JSON.stringify({
+            type: "mediasoup_rtp_capabilities",
+            rtpCapabilities
+          }));
+          break;
+        }
+
+        // 🎬 Mediasoup: создание транспорта
+        case "mediasoup_create_transport": {
+          if (!USE_MEDIASOUP || !mediasoupHandler || !mediasoupHandler.isReady) {
+            ws.send(JSON.stringify({ type: "error", message: "Mediasoup не доступен" }));
+            return;
+          }
+
+          if (!ws.name) {
+            ws.send(JSON.stringify({ type: "error", message: "Сначала войдите в игру" }));
+            return;
+          }
+
+          (async () => {
+            try {
+              const transport = await mediasoupHandler.createTransport(
+                ws.id,
+                data.direction || 'both'
+              );
+              
+              ws.send(JSON.stringify({
+                type: "mediasoup_transport_created",
+                transport,
+                direction: data.direction || 'both'
+              }));
+            } catch (error) {
+              console.error(`❌ Ошибка создания транспорта для ${ws.name}:`, error);
+              ws.send(JSON.stringify({
+                type: "error",
+                message: `Ошибка Mediasoup: ${error.message}`
+              }));
+            }
+          })();
+          break;
+        }
+
+        // 🎬 Mediasoup: подключение транспорта
+        case "mediasoup_connect_transport": {
+          if (!USE_MEDIASOUP || !mediasoupHandler || !mediasoupHandler.isReady) {
+            break;
+          }
+
+          if (!data.transportId || !data.dtlsParameters) {
+            ws.send(JSON.stringify({ type: "error", message: "Неверные параметры" }));
+            return;
+          }
+
+          (async () => {
+            try {
+              await mediasoupHandler.connectTransport(
+                ws.id,
+                data.transportId,
+                data.dtlsParameters,
+                data.direction || 'send'
+              );
+              
+              ws.send(JSON.stringify({
+                type: "mediasoup_transport_connected",
+                transportId: data.transportId
+              }));
+            } catch (error) {
+              console.error(`❌ Ошибка подключения транспорта для ${ws.name}:`, error);
+              ws.send(JSON.stringify({
+                type: "error",
+                message: `Ошибка Mediasoup: ${error.message}`
+              }));
+            }
+          })();
+          break;
+        }
+
+        // 🎬 Mediasoup: создание Producer
+        case "mediasoup_create_producer": {
+          if (!USE_MEDIASOUP || !mediasoupHandler || !mediasoupHandler.isReady) {
+            break;
+          }
+
+          if (!data.transportId || !data.kind || !data.rtpParameters) {
+            ws.send(JSON.stringify({ type: "error", message: "Неверные параметры" }));
+            return;
+          }
+
+          (async () => {
+            try {
+              const producer = await mediasoupHandler.createProducer(
+                ws.id,
+                data.transportId,
+                data.kind,
+                data.rtpParameters
+              );
+              
+              ws.send(JSON.stringify({
+                type: "mediasoup_producer_created",
+                producer
+              }));
+
+              // Уведомляем всех остальных игроков о новом producer
+              broadcast({
+                type: "mediasoup_new_producer",
+                playerId: ws.id,
+                playerName: ws.name,
+                producerId: producer.id,
+                kind: producer.kind
+              }, ws);
+
+            } catch (error) {
+              console.error(`❌ Ошибка создания producer для ${ws.name}:`, error);
+              ws.send(JSON.stringify({
+                type: "error",
+                message: `Ошибка Mediasoup: ${error.message}`
+              }));
+            }
+          })();
+          break;
+        }
+
+        // 🎬 Mediasoup: получение списка активных producers
+        case "mediasoup_get_active_producers": {
+          if (!USE_MEDIASOUP || !mediasoupHandler || !mediasoupHandler.isReady) {
+            break;
+          }
+
+          const producers = mediasoupHandler.getActiveProducers();
+          ws.send(JSON.stringify({
+            type: "mediasoup_active_producers",
+            producers
+          }));
+          break;
+        }
+
+        // 🎬 Mediasoup: создание Consumer
+        case "mediasoup_create_consumer": {
+          if (!USE_MEDIASOUP || !mediasoupHandler || !mediasoupHandler.isReady) {
+            break;
+          }
+
+          if (!data.remotePlayerId || !data.kind) {
+            ws.send(JSON.stringify({ type: "error", message: "Неверные параметры" }));
+            return;
+          }
+
+          (async () => {
+            try {
+              const consumer = await mediasoupHandler.createConsumer(
+                ws.id,
+                data.remotePlayerId,
+                data.kind
+              );
+              
+              ws.send(JSON.stringify({
+                type: "mediasoup_consumer_created",
+                consumer,
+                remotePlayerId: data.remotePlayerId
+              }));
+            } catch (error) {
+              console.error(`❌ Ошибка создания consumer для ${ws.name}:`, error);
+              ws.send(JSON.stringify({
+                type: "error",
+                message: `Ошибка Mediasoup: ${error.message}`
+              }));
+            }
+          })();
+          break;
+        }
+
+        // 📡 WebRTC сигналы - УЛУЧШЕННАЯ ВЕРСИЯ (P2P режим, используется если медиа-сервер не включен)
         case "signal": {
-          // Если Kurento включен, не обрабатываем P2P сигналы
-          if (USE_KURENTO && kurentoHandler) {
-            console.log(`⚠️ Игнорируем P2P сигнал от ${ws.name}, используется Kurento`);
+          // Если Mediasoup или Kurento включен, не обрабатываем P2P сигналы
+          if ((USE_MEDIASOUP && mediasoupHandler) || (USE_KURENTO && kurentoHandler)) {
+            console.log(`⚠️ Игнорируем P2P сигнал от ${ws.name}, используется медиа-сервер`);
             break;
           }
 
@@ -1798,7 +1994,17 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     console.log(`❌ Отключился: ${ws.name || 'Unknown'} (${ws.role})`);
     
-    // Удаляем игрока из Kurento (если используется)
+    // Удаляем игрока из медиа-сервера (если используется)
+    if (USE_MEDIASOUP && mediasoupHandler && ws.id) {
+      (async () => {
+        try {
+          await mediasoupHandler.removePlayer(ws.id);
+        } catch (error) {
+          console.error(`⚠️ Ошибка удаления игрока из Mediasoup:`, error);
+        }
+      })();
+    }
+    
     if (USE_KURENTO && kurentoHandler && ws.id) {
       (async () => {
         try {
