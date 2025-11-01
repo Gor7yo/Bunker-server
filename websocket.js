@@ -1,8 +1,6 @@
 // server.js
 const WebSocket = require("ws");
 const propertiesData = require("./properties.json");
-const mediasoupServer = require("./mediasoup-server");
-const { handleMediasoupMessage } = require("./mediasoup-handlers");
 
 const wss = new WebSocket.Server({ port: 5000 }, () =>
   console.log("✅ Сервер запущен на порту 5000")
@@ -803,7 +801,7 @@ function checkVotingComplete() {
 // ============================
 // ✅ Проверяем: все ли готовы, и можно ли стартовать
 // ============================
-async function checkAllReady() {
+function checkAllReady() {
   const activePlayers = allPlayers.filter(p => p.readyState === WebSocket.OPEN);
   const activeHost = host && host.readyState === WebSocket.OPEN ? host : null;
 
@@ -824,48 +822,14 @@ async function checkAllReady() {
     gameState.startTime = Date.now(); // Запоминаем время начала игры
     gameState.ready = false; // Сбрасываем готовность (админ еще не нажал "Начать")
     gameState.currentRound = 0; // Сбрасываем раунд при начале игры
-    console.log("🎮 Игра началась! Генерируем карты и подключаем к Mediasoup SFU...");
+    console.log("🎮 Игра началась! Генерируем карты и устанавливаем WebRTC соединения...");
     
     // Генерируем карты для всех игроков
     generateAllPlayerCards();
     
-    // Подключаем всех игроков к Mediasoup SFU
-    const allConnections = [...allPlayers, host].filter(p => p && p.readyState === WebSocket.OPEN);
-    
-    try {
-      // Отправляем RTP capabilities всем игрокам
-      const rtpCapabilities = await mediasoupServer.getRouterRtpCapabilities();
-      
-      allConnections.forEach(async (player) => {
-        try {
-          // Подключаем игрока к Mediasoup
-          const transportInfo = await mediasoupServer.connectPlayer(player.id);
-          
-          // Отправляем игроку информацию для подключения к Mediasoup
-          player.send(JSON.stringify({
-            type: "mediasoup_connect",
-            rtpCapabilities: rtpCapabilities,
-            sendTransport: transportInfo.sendTransport,
-            recvTransport: transportInfo.recvTransport,
-          }));
-          console.log(`✅ Игрок ${player.name} (${player.id}) подключен к Mediasoup SFU`);
-        } catch (error) {
-          console.error(`❌ Ошибка подключения игрока ${player.name} к Mediasoup:`, error);
-          console.log(`⚠️ Игрок ${player.name} будет использовать mesh топологию вместо SFU`);
-        }
-      });
-    } catch (error) {
-      console.error('❌ Mediasoup недоступен:', error);
-      console.log('⚠️ Все игроки будут использовать mesh топологию вместо SFU');
-      broadcast({
-        type: "game_message",
-        message: "Mediasoup SFU недоступен, используется mesh топология"
-      });
-    }
-    
     broadcast({ 
       type: "game_started",
-      message: "Игра начинается! Карты сгенерированы, подключаемся к видеосерверу..."
+      message: "Игра начинается! Карты сгенерированы, устанавливаем видеосвязь..."
     });
     
     // Отправляем обновленные данные игроков с характеристиками
@@ -924,11 +888,6 @@ wss.on("connection", (ws) => {
   ws.on("message", (message) => {
     try {
       const data = JSON.parse(message);
-
-      // Обработка сообщений Mediasoup SFU
-      if (handleMediasoupMessage(ws, data, allPlayers, host)) {
-        return; // Сообщение обработано
-      }
 
       switch (data.type) {
         // 🎛️ Вход в админ-панель (отдельное подключение, не считается игроком)
@@ -1733,11 +1692,6 @@ wss.on("connection", (ws) => {
   // ❌ Отключение клиента
   ws.on("close", () => {
     console.log(`❌ Отключился: ${ws.name || 'Unknown'} (${ws.role})`);
-    
-    // Отключаем от Mediasoup SFU
-    mediasoupServer.disconnectPlayer(ws.id).catch(err => {
-      console.error(`⚠️ Ошибка отключения от Mediasoup:`, err);
-    });
     
     // 💾 Сохраняем данные игрока перед отключением (если игра началась)
     // НЕ сохраняем для админ-панели
