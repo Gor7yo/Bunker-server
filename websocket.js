@@ -1002,8 +1002,17 @@ wss.on("connection", (ws) => {
             return;
           }
 
-          // Если у игрока уже есть имя
+          // Если у игрока уже есть имя (изменение никнейма)
           if (ws.name) {
+            // Проверяем, не занят ли новый никнейм
+            const activePlayers = [...allPlayers, host].filter(p => p && p.readyState === WebSocket.OPEN);
+            const existingPlayer = activePlayers.find(p => p.name && p.name.toLowerCase() === nickname.toLowerCase() && p.id !== ws.id);
+            
+            if (existingPlayer) {
+              ws.send(JSON.stringify({ type: "error", message: "Никнейм уже занят" }));
+              return;
+            }
+            
             if (ws.name !== nickname) {
               ws.name = nickname;
               sendPlayersUpdate();
@@ -1011,21 +1020,12 @@ wss.on("connection", (ws) => {
             return;
           }
 
-          // Проверка на дубликаты имен среди активных игроков
-          const activePlayers = [...allPlayers, host].filter(p => p && p.readyState === WebSocket.OPEN);
-          const existingPlayer = activePlayers.find(p => p.name && p.name.toLowerCase() === nickname.toLowerCase());
-          
-          if (existingPlayer && existingPlayer.id !== ws.id) {
-            ws.send(JSON.stringify({ type: "error", message: "Никнейм уже занят" }));
-            return;
-          }
-
-          // 🔄 ПЕРЕЗАХОД: Проверяем, есть ли сохраненные данные для этого никнейма
+          // 🔄 СНАЧАЛА: Проверяем переподключение (сохраненные данные)
           const disconnectedData = disconnectedPlayers.get(nickname.toLowerCase());
           let isReconnecting = false;
           
           if (disconnectedData && gameState.started) {
-            // Восстанавливаем данные игрока
+            // Восстанавливаем данные игрока при переподключении
             console.log(`🔄 Игрок ${nickname} переподключается, восстанавливаем данные...`);
             isReconnecting = true;
             
@@ -1050,6 +1050,15 @@ wss.on("connection", (ws) => {
               characteristicsCount: ws.characteristics ? Object.keys(ws.characteristics).length : 0
             });
           } else {
+            // Проверка на дубликаты имен среди активных игроков (только если не переподключение)
+            const activePlayers = [...allPlayers, host].filter(p => p && p.readyState === WebSocket.OPEN);
+            const existingPlayer = activePlayers.find(p => p.name && p.name.toLowerCase() === nickname.toLowerCase());
+            
+            if (existingPlayer && existingPlayer.id !== ws.id) {
+              ws.send(JSON.stringify({ type: "error", message: "Никнейм уже занят" }));
+              return;
+            }
+            
             // Обычный вход - просто устанавливаем имя
             ws.name = nickname;
           }
@@ -1099,7 +1108,8 @@ wss.on("connection", (ws) => {
             if (!allPlayers.includes(ws)) {
               const activeRegularPlayers = allPlayers.filter(p => p.readyState === WebSocket.OPEN);
               
-              if (activeRegularPlayers.length >= MAX_PLAYERS && !isReconnecting) {
+              // Проверяем лимит только если игра не началась (во время игры можно заходить для переподключений и новых игроков)
+              if (activeRegularPlayers.length >= MAX_PLAYERS && !isReconnecting && !gameState.started) {
                 ws.send(JSON.stringify({ 
                   type: "error", 
                   message: `Лобби заполнено (максимум ${MAX_PLAYERS} игроков)` 
@@ -1122,13 +1132,18 @@ wss.on("connection", (ws) => {
             if (gameState.started) {
               console.log(`🎮 Игрок ${ws.name} заходит в уже начатую игру`);
               
-              // Если у игрока нет карточек (заходит впервые во время игры), генерируем их
-              if (!ws.characteristics) {
+              // Если это не переподключение и у игрока нет карточек (заходит впервые во время игры), генерируем их
+              if (!isReconnecting && !ws.characteristics) {
                 console.log(`🎲 Генерируем карты для игрока ${ws.name} (заход во время игры)`);
                 ws.characteristics = generatePlayerCharacteristics();
                 // Помечаем карты как использованные
                 markPlayerCardsAsUsed(ws.characteristics);
                 // Отправляем обновление сразу
+                sendPlayersUpdate();
+              }
+              
+              // Если это переподключение, отправляем обновление чтобы показать восстановленные данные
+              if (isReconnecting) {
                 sendPlayersUpdate();
               }
               
