@@ -1,10 +1,37 @@
 // server.js
 const WebSocket = require("ws");
 const propertiesData = require("./properties.json");
+const KurentoHandler = require("./kurento-handler");
 
 const wss = new WebSocket.Server({ port: 5000 }, () =>
   console.log("✅ Сервер запущен на порту 5000")
 );
+
+// Инициализация Kurento (опционально, можно отключить через переменную окружения)
+const USE_KURENTO = process.env.USE_KURENTO === 'true';
+let kurentoHandler = null;
+
+if (USE_KURENTO) {
+  try {
+    kurentoHandler = new KurentoHandler();
+    // Переопределяем callback для ICE кандидатов
+    kurentoHandler.onIceCandidate = (playerId, candidate) => {
+      const player = [...allPlayers, host].find(p => p && p.id === playerId);
+      if (player && player.readyState === WebSocket.OPEN) {
+        player.send(JSON.stringify({
+          type: 'kurento_ice_candidate',
+          candidate: candidate
+        }));
+      }
+    };
+    console.log("✅ Kurento Handler инициализирован (используется Kurento Media Server)");
+  } catch (error) {
+    console.error("⚠️ Не удалось инициализировать Kurento, используем P2P режим:", error.message);
+    kurentoHandler = null;
+  }
+} else {
+  console.log("ℹ️ Kurento отключен, используется P2P режим. Для включения установите USE_KURENTO=true");
+}
 
 const MAX_PLAYERS = 8; // Увеличил до 8
 let allPlayers = [];
@@ -1134,8 +1161,86 @@ wss.on("connection", (ws) => {
         }
 
 
-        // 📡 WebRTC сигналы - УЛУЧШЕННАЯ ВЕРСИЯ
+        // 🎬 Kurento: обработка SDP offer от клиента
+        case "kurento_offer": {
+          if (!USE_KURENTO || !kurentoHandler) {
+            ws.send(JSON.stringify({ 
+              type: "error", 
+              message: "Kurento не включен на сервере" 
+            }));
+            return;
+          }
+
+          if (!ws.name) {
+            ws.send(JSON.stringify({ type: "error", message: "Сначала войдите в игру" }));
+            return;
+          }
+
+          (async () => {
+            try {
+              // Добавляем игрока в Kurento медиа-хаб (если еще не добавлен)
+              let endpoint = null;
+              try {
+                endpoint = await kurentoHandler.addPlayer(ws.id, ws.name);
+              } catch (e) {
+                // Игрок может быть уже добавлен
+                const playerData = kurentoHandler.endpoints.get(ws.id);
+                if (playerData) {
+                  endpoint = playerData.endpoint;
+                } else {
+                  throw e;
+                }
+              }
+
+              // Обрабатываем SDP offer
+              const sdpAnswer = await kurentoHandler.processOffer(ws.id, data.sdpOffer);
+
+              // Отправляем SDP answer клиенту
+              ws.send(JSON.stringify({
+                type: 'kurento_answer',
+                sdpAnswer: sdpAnswer
+              }));
+
+              // Подключаем все endpoints друг к другу
+              await kurentoHandler.connectEndpoints();
+
+            } catch (error) {
+              console.error(`❌ Ошибка обработки Kurento offer от ${ws.name}:`, error);
+              ws.send(JSON.stringify({
+                type: 'error',
+                message: `Ошибка Kurento: ${error.message}`
+              }));
+            }
+          })();
+          break;
+        }
+
+        // 🧊 Kurento: обработка ICE кандидата от клиента
+        case "kurento_ice_candidate": {
+          if (!USE_KURENTO || !kurentoHandler) {
+            break; // Игнорируем если Kurento не включен
+          }
+
+          if (data.candidate) {
+            (async () => {
+              try {
+                await kurentoHandler.addIceCandidate(ws.id, data.candidate);
+              } catch (error) {
+                console.error(`❌ Ошибка добавления ICE кандидата от ${ws.name}:`, error);
+              }
+            })();
+          }
+          break;
+        }
+
+        // 📡 WebRTC сигналы - УЛУЧШЕННАЯ ВЕРСИЯ (P2P режим, используется если Kurento не включен)
         case "signal": {
+          // Если Kurento включен, не обрабатываем P2P сигналы
+          if (USE_KURENTO && kurentoHandler) {
+            console.log(`⚠️ Игнорируем P2P сигнал от ${ws.name}, используется Kurento`);
+            break;
+          }
+
           if (!data.targetId || !data.signal) {
             ws.send(JSON.stringify({ type: "error", message: "Неверный сигнал" }));
             return;
@@ -1692,6 +1797,17 @@ wss.on("connection", (ws) => {
   // ❌ Отключение клиента
   ws.on("close", () => {
     console.log(`❌ Отключился: ${ws.name || 'Unknown'} (${ws.role})`);
+    
+    // Удаляем игрока из Kurento (если используется)
+    if (USE_KURENTO && kurentoHandler && ws.id) {
+      (async () => {
+        try {
+          await kurentoHandler.removePlayer(ws.id);
+        } catch (error) {
+          console.error(`⚠️ Ошибка удаления игрока из Kurento:`, error);
+        }
+      })();
+    }
     
     // 💾 Сохраняем данные игрока перед отключением (если игра началась)
     // НЕ сохраняем для админ-панели

@@ -14,6 +14,9 @@ importers:
       express:
         specifier: ^5.1.0
         version: 5.1.0
+      kurento-client:
+        specifier: ^7.2.0
+        version: 7.2.0(bufferutil@4.0.9)
       mediasoup:
         specifier: ^3.19.7
         version: 3.19.7
@@ -22,7 +25,7 @@ importers:
         version: 3.1.10
       ws:
         specifier: ^8.18.3
-        version: 8.18.3
+        version: 8.18.3(bufferutil@4.0.9)
 
 packages:
 
@@ -41,6 +44,16 @@ packages:
     resolution: {integrity: sha512-KMReFUr0B4t+D+OBkjR3KYqvocp2XaSzO55UcB6mgQMd3KbcE+mWTyvVV7D/zsdEbNnV6acZUutkiHQXvTr1Rw==}
     engines: {node: '>= 8'}
 
+  asap@2.0.6:
+    resolution: {integrity: sha512-BSHWgDSAiKs50o2Re8ppvp3seVHXSRM44cdSsT9FfNEUUZLOGWVCsiWaRPWM1Znn+mqZ1OfVZ3z3DWEzSp7hRA==}
+
+  async@2.6.4:
+    resolution: {integrity: sha512-mzo5dfJYwAn29PeiJ0zvwTo04zj8HDJj0Mn8TD7sno7q12prdbnasKJHhkm2c1LgrhlJ0teaea8860oxi51mGA==}
+
+  backoff@2.3.0:
+    resolution: {integrity: sha512-ljr33cUQ/vyXE/60QuRO+WKGW4PzQ5OTWNXPWQwOTx5gh43q0pZocaVyXoU2gvFtasMIdIohdm9s01qoT6IJBQ==}
+    engines: {node: '>= 0.6'}
+
   balanced-match@1.0.2:
     resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
 
@@ -58,6 +71,10 @@ packages:
   braces@3.0.3:
     resolution: {integrity: sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==}
     engines: {node: '>=8'}
+
+  bufferutil@4.0.9:
+    resolution: {integrity: sha512-WDtdLmJvAuNNPzByAYpRo2rF1Mmradw6gvWsQKf63476DDXmomT9zUiGypLcG4ibIM67vhAj8jJRdbmEws2Aqw==}
+    engines: {node: '>=6.14.2'}
 
   bytes@3.1.2:
     resolution: {integrity: sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==}
@@ -78,6 +95,10 @@ packages:
   chownr@3.0.0:
     resolution: {integrity: sha512-+IxzY9BZOQd/XuYPRmrvEVjF/nqj5kgT4kEq7VofrDoM1MxoRjEWkrCC3EtLi59TVawxTAn+orJwFQcrqEN1+g==}
     engines: {node: '>=18'}
+
+  commander@2.1.0:
+    resolution: {integrity: sha512-J2wnb6TKniXNOtoHS8TSrG9IOQluPrsmyAJ8oCUJOBmv+uLBCyPYAZkD2jFvw2DCzIXNnISIM01NIvr35TkBMQ==}
+    engines: {node: '>= 0.6.x'}
 
   concat-map@0.0.1:
     resolution: {integrity: sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg==}
@@ -142,6 +163,9 @@ packages:
     resolution: {integrity: sha512-FGgH2h8zKNim9ljj7dankFPcICIK9Cp5bm+c2gQSYePhpaG5+esrLODihIorn+Pe6FGJzWhXQotPv73jTaldXA==}
     engines: {node: '>= 0.4'}
 
+  es6-promise@4.2.8:
+    resolution: {integrity: sha512-HJDGx5daxeIvxdBxvG2cb9g4tEvwIk3i8+nhX0yGrYmZUzbkdg8QbDevheDB8gd0//uPj4c1EQua8Q+MViT0/w==}
+
   escape-html@1.0.3:
     resolution: {integrity: sha512-NiSupZ4OeuGwr68lGIeym/ksIZMJodUGOSCZ/FSnTxcrekbvqrgdUxlJOMpijaKZVjAJrWrGs/6Jy8OMuyj9ow==}
 
@@ -152,6 +176,9 @@ packages:
   express@5.1.0:
     resolution: {integrity: sha512-DT9ck5YIRU+8GYzzU5kT3eHGA5iL+1Zd0EutOmTE9Dtk+Tvuzd23VBU+ec7HPNSTxXYO55gPV/hq4pSBJDjFpA==}
     engines: {node: '>= 18'}
+
+  extend@3.0.2:
+    resolution: {integrity: sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g==}
 
   fetch-blob@3.2.0:
     resolution: {integrity: sha512-7yAQpD2UMJzLi1Dqv7qFYnPbaPx7ZfFK6PiIxQ4PfkGPyNyl2Ugx+a/umUonmKqjhM4DnfbMvdX6otXq83soQQ==}
@@ -265,6 +292,27 @@ packages:
   is-promise@4.0.0:
     resolution: {integrity: sha512-hvpoI6korhJMnej285dSg6nu1+e6uxs7zG3BYAm5byqDsgJNWwxzM6z6iZiAgQR4TJ30JmBTOwqZUw3WlyH3AQ==}
 
+  isbuffer@0.0.0:
+    resolution: {integrity: sha512-xU+NoHp+YtKQkaM2HsQchYn0sltxMxew0HavMfHbjnucBoTSGbw745tL+Z7QBANleWM1eEQMenEpi174mIeS4g==}
+
+  kurento-client-core@7.2.0:
+    resolution: {integrity: sha512-5xwUFPSt+0ngxVyKZNqxywO8H0FJcZcQ75JjUqCjaFHo1OcQ8lSzToP6Rw44KobiMahZsCDK3sojs9lfjDOSpQ==}
+
+  kurento-client-elements@7.2.0:
+    resolution: {integrity: sha512-Tq/cIv+DAFNo0I8WkKyNDUajMI9Fa6fLN3vGnB/ByNY13gXB2uqmwU5+QNuBv4MSqJVq8ttyyJuStXCgT9RKOg==}
+
+  kurento-client-filters@7.2.0:
+    resolution: {integrity: sha512-m6nI6vW/dsvvywFCmtbuWxLDyzWYkifhOlj+o9y/qLe/P5pRUp3kiSg2NaMIlAeQ90x8eU3rkI56zf8vXMUhpA==}
+
+  kurento-client@7.2.0:
+    resolution: {integrity: sha512-ri/2N5tT9nwMk92Myg7RV3LA1Ex1sDM3FvvNE7AVOCCXmS6GrMdhDLD3+v+T1VZq4kk4Tt8ptw8P4Qf68dX14Q==}
+
+  kurento-jsonrpc@7.2.0:
+    resolution: {integrity: sha512-Mk49JeXamPOYoXRZpSkVEamchBnQR9rEofiHvLPCxLF3pjUDBtwE+vPUf0+1MvizsGqOwDYVxEvEFFWWecl5Mw==}
+
+  lodash@4.17.21:
+    resolution: {integrity: sha512-v2kDEe57lecTulaDIuNTPy3Ry4gLGJ6Z1O3vE1krgXZNrsQ+LFTGHVxVjcXPs17LhbZVGedAJv8XZ1tvj5FvSg==}
+
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
@@ -292,6 +340,9 @@ packages:
   minimatch@3.1.2:
     resolution: {integrity: sha512-J7p63hRiAjw1NDEww1W7i37+ByIrOWO5XQQAzZ3VOcL0PNybwpfmV/N05zFAzwQ9USyEcX6t3UO+K5aqBQOIHw==}
 
+  minimist@1.2.8:
+    resolution: {integrity: sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==}
+
   minipass@7.1.2:
     resolution: {integrity: sha512-qOOzS1cBTWYF4BH8fVePDBOO9iptMnGUEZwNc/cMWnTV2nVLZ7VoNWEPHkYczZA0pdoA7dl6e7FL659nX9S2aw==}
     engines: {node: '>=16 || 14 >=14.17'}
@@ -302,6 +353,9 @@ packages:
 
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
+
+  nan@1.0.0:
+    resolution: {integrity: sha512-Wm2/nFOm2y9HtJfgOLnctGbfvF23FcQZeyUZqDD8JQG3zO5kXh3MkQKiUaA68mJiVWrOzLFkAV1u6bC8P52DJA==}
 
   negotiator@1.0.0:
     resolution: {integrity: sha512-8Ofs/AUQh8MaEcrlq5xOX0CQ9ypTF5dl78mjlMNfOK08fzpgTHQRQPBxcPlEtIw0yRpws+Zo/3r+5WRby7u3Gg==}
@@ -315,6 +369,10 @@ packages:
   node-fetch@3.3.2:
     resolution: {integrity: sha512-dRB78srN/l6gqWulah9SrxeYnxeddIG30+GOqK/9OlLVyLg3HPnr6SqOWTWOXKRwC2eGYCkZ59NNuSgvSrpgOA==}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
+
+  node-gyp-build@4.8.4:
+    resolution: {integrity: sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ==}
+    hasBin: true
 
   nodemon@3.1.10:
     resolution: {integrity: sha512-WDjw3pJ0/0jMFmyNDp3gvY2YizjLmmOUQo6DEBY+JgdvW/yQ9mEeSw6H5ythl5Ny2ytb7f9C2nIbjSxMNzbJXw==}
@@ -340,6 +398,10 @@ packages:
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
 
+  options@0.0.6:
+    resolution: {integrity: sha512-bOj3L1ypm++N+n7CEbbe473A414AB7z+amKYshRb//iuL3MpdDCLhPnw6aVTdKB9g5ZRVHIEp8eUln6L2NUStg==}
+    engines: {node: '>=0.4.0'}
+
   parseurl@1.3.3:
     resolution: {integrity: sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ==}
     engines: {node: '>= 0.8'}
@@ -350,6 +412,12 @@ packages:
   picomatch@2.3.1:
     resolution: {integrity: sha512-JU3teHTNjmE2VCGFzuY8EXzCDVwEqB2a8fsIvwaStHhAWJEeVd1o1QD80CU6+ZdEXXSLbSsuLwJjkCBWqRQUVA==}
     engines: {node: '>=8.6'}
+
+  promise@7.1.1:
+    resolution: {integrity: sha512-mxw1Fcl1jxLdpzS7MTIxrdiWk3CeMvZvVSGWE4P9eml3diZPBZTNV4oQsdYY3fY6j9udbmC1mSP6lqlzg6voBA==}
+
+  promisecallback@0.0.4:
+    resolution: {integrity: sha512-AROBTO8q8oDxsWMjouDnOwiDz/p11F/VPtSNMhx0FTLS2/OpTV9tER9BrDaWelREUOAqc6Qla1YJ4GoyXYhCaA==}
 
   proxy-addr@2.0.7:
     resolution: {integrity: sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==}
@@ -373,6 +441,14 @@ packages:
   readdirp@3.6.0:
     resolution: {integrity: sha512-hOS089on8RduqdbhvQ5Z37A0ESjsqz6qnRcffsMU3495FuTdqSm+7bhJ29JvIOsBDEEnan5DPu9t3To9VRlMzA==}
     engines: {node: '>=8.10.0'}
+
+  reconnect-core@https://codeload.github.com/KurentoForks/reconnect-core/tar.gz/921d43e91578abb2fb2613f585c010c1939cf734:
+    resolution: {tarball: https://codeload.github.com/KurentoForks/reconnect-core/tar.gz/921d43e91578abb2fb2613f585c010c1939cf734}
+    version: 1.0.0
+
+  reconnect-ws@https://codeload.github.com/KurentoForks/reconnect-ws/tar.gz/f287385d75861654528c352e60221f95c9209f8a:
+    resolution: {tarball: https://codeload.github.com/KurentoForks/reconnect-ws/tar.gz/f287385d75861654528c352e60221f95c9209f8a}
+    version: 0.0.0
 
   router@2.2.0:
     resolution: {integrity: sha512-nLTrUKm2UyiL7rlhapu/Zl45FwNgkZGaCpZbIHajDYgwlJCOzLSk+cIPAnsEqV955GjILJnKbdQC1nVPz+gAYQ==}
@@ -440,6 +516,13 @@ packages:
     resolution: {integrity: sha512-7NyxrTE4Anh8km8iEy7o0QYPs+0JKBTj5ZaqHg6B39erLg0qYXN3BijtShwbsNSvQ+LN75+KV+C4QR/f6Gwnpg==}
     engines: {node: '>=18'}
 
+  through@2.3.8:
+    resolution: {integrity: sha512-w89qg7PI8wAdvX60bMDP+bFoD5Dvhm9oLheFp5O4a2QF0cSBGsBX4qZmadPMvVqlLJBBci+WqGGOAPvcDeNSVg==}
+
+  tinycolor@0.0.1:
+    resolution: {integrity: sha512-+CorETse1kl98xg0WAzii8DTT4ABF4R3nquhrkIbVGcw1T8JYs5Gfx9xEfGINPUZGDj9C4BmOtuKeaTtuuRolg==}
+    engines: {node: '>=0.4.0'}
+
   to-regex-range@5.0.1:
     resolution: {integrity: sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ==}
     engines: {node: '>=8.0'}
@@ -471,8 +554,37 @@ packages:
     resolution: {integrity: sha512-d2JWLCivmZYTSIoge9MsgFCZrt571BikcWGYkjC1khllbTeDlGqZ2D8vD8E/lJa8WGWbb7Plm8/XJYV7IJHZZw==}
     engines: {node: '>= 8'}
 
+  websocket-stream@0.5.1:
+    resolution: {integrity: sha512-8noZCS4xBbsb24dM20jxEHhorFDQb6MY96vqIb/iFWt05voa8liGxyB0843H9AuCpgTdVETIAGUr47WV2SorOw==}
+    engines: {node: '>=0.8'}
+
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
+
+  ws@0.4.32:
+    resolution: {integrity: sha512-htqsS0U9Z9lb3ITjidQkRvkLdVhQePrMeu475yEfOWkAYvJ6dSjQp1tOH6ugaddzX5b7sQjMPNtY71eTzrV/kA==}
+    engines: {node: '>=0.4.0'}
+    hasBin: true
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: ^5.0.2
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
+  ws@7.5.10:
+    resolution: {integrity: sha512-+dbF1tHwZpXcbOJdVOkzLDxZP1ailvSxM6ZweXTegylPny803bFhA+vqBYw4s31NSAk4S2Qz+AKXK9a4wkdjcQ==}
+    engines: {node: '>=8.3.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: ^5.0.2
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
 
   ws@8.18.3:
     resolution: {integrity: sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg==}
@@ -508,6 +620,14 @@ snapshots:
       normalize-path: 3.0.0
       picomatch: 2.3.1
 
+  asap@2.0.6: {}
+
+  async@2.6.4:
+    dependencies:
+      lodash: 4.17.21
+
+  backoff@2.3.0: {}
+
   balanced-match@1.0.2: {}
 
   binary-extensions@2.3.0: {}
@@ -535,6 +655,10 @@ snapshots:
     dependencies:
       fill-range: 7.1.1
 
+  bufferutil@4.0.9:
+    dependencies:
+      node-gyp-build: 4.8.4
+
   bytes@3.1.2: {}
 
   call-bind-apply-helpers@1.0.2:
@@ -560,6 +684,8 @@ snapshots:
       fsevents: 2.3.3
 
   chownr@3.0.0: {}
+
+  commander@2.1.0: {}
 
   concat-map@0.0.1: {}
 
@@ -616,6 +742,8 @@ snapshots:
     dependencies:
       es-errors: 1.3.0
 
+  es6-promise@4.2.8: {}
+
   escape-html@1.0.3: {}
 
   etag@1.8.1: {}
@@ -651,6 +779,8 @@ snapshots:
       vary: 1.1.2
     transitivePeerDependencies:
       - supports-color
+
+  extend@3.0.2: {}
 
   fetch-blob@3.2.0:
     dependencies:
@@ -763,6 +893,42 @@ snapshots:
 
   is-promise@4.0.0: {}
 
+  isbuffer@0.0.0: {}
+
+  kurento-client-core@7.2.0: {}
+
+  kurento-client-elements@7.2.0: {}
+
+  kurento-client-filters@7.2.0: {}
+
+  kurento-client@7.2.0(bufferutil@4.0.9):
+    dependencies:
+      async: 2.6.4
+      es6-promise: 4.2.8
+      extend: 3.0.2
+      inherits: 2.0.4
+      kurento-client-core: 7.2.0
+      kurento-client-elements: 7.2.0
+      kurento-client-filters: 7.2.0
+      kurento-jsonrpc: 7.2.0
+      minimist: 1.2.8
+      promise: 7.1.1
+      promisecallback: 0.0.4
+      reconnect-ws: https://codeload.github.com/KurentoForks/reconnect-ws/tar.gz/f287385d75861654528c352e60221f95c9209f8a(bufferutil@4.0.9)
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
+  kurento-jsonrpc@7.2.0:
+    dependencies:
+      bufferutil: 4.0.9
+      inherits: 2.0.4
+      ws: 7.5.10(bufferutil@4.0.9)
+    transitivePeerDependencies:
+      - utf-8-validate
+
+  lodash@4.17.21: {}
+
   math-intrinsics@1.1.0: {}
 
   media-typer@1.1.0: {}
@@ -790,6 +956,8 @@ snapshots:
     dependencies:
       brace-expansion: 1.1.12
 
+  minimist@1.2.8: {}
+
   minipass@7.1.2: {}
 
   minizlib@3.1.0:
@@ -797,6 +965,8 @@ snapshots:
       minipass: 7.1.2
 
   ms@2.1.3: {}
+
+  nan@1.0.0: {}
 
   negotiator@1.0.0: {}
 
@@ -807,6 +977,8 @@ snapshots:
       data-uri-to-buffer: 4.0.1
       fetch-blob: 3.2.0
       formdata-polyfill: 4.0.10
+
+  node-gyp-build@4.8.4: {}
 
   nodemon@3.1.10:
     dependencies:
@@ -835,11 +1007,19 @@ snapshots:
     dependencies:
       wrappy: 1.0.2
 
+  options@0.0.6: {}
+
   parseurl@1.3.3: {}
 
   path-to-regexp@8.3.0: {}
 
   picomatch@2.3.1: {}
+
+  promise@7.1.1:
+    dependencies:
+      asap: 2.0.6
+
+  promisecallback@0.0.4: {}
 
   proxy-addr@2.0.7:
     dependencies:
@@ -864,6 +1044,18 @@ snapshots:
   readdirp@3.6.0:
     dependencies:
       picomatch: 2.3.1
+
+  reconnect-core@https://codeload.github.com/KurentoForks/reconnect-core/tar.gz/921d43e91578abb2fb2613f585c010c1939cf734:
+    dependencies:
+      backoff: 2.3.0
+
+  reconnect-ws@https://codeload.github.com/KurentoForks/reconnect-ws/tar.gz/f287385d75861654528c352e60221f95c9209f8a(bufferutil@4.0.9):
+    dependencies:
+      reconnect-core: https://codeload.github.com/KurentoForks/reconnect-core/tar.gz/921d43e91578abb2fb2613f585c010c1939cf734
+      websocket-stream: 0.5.1(bufferutil@4.0.9)
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
 
   router@2.2.0:
     dependencies:
@@ -958,6 +1150,10 @@ snapshots:
       minizlib: 3.1.0
       yallist: 5.0.0
 
+  through@2.3.8: {}
+
+  tinycolor@0.0.1: {}
+
   to-regex-range@5.0.1:
     dependencies:
       is-number: 7.0.0
@@ -980,8 +1176,32 @@ snapshots:
 
   web-streams-polyfill@3.3.3: {}
 
+  websocket-stream@0.5.1(bufferutil@4.0.9):
+    dependencies:
+      isbuffer: 0.0.0
+      through: 2.3.8
+      ws: 0.4.32(bufferutil@4.0.9)
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
   wrappy@1.0.2: {}
 
-  ws@8.18.3: {}
+  ws@0.4.32(bufferutil@4.0.9):
+    dependencies:
+      commander: 2.1.0
+      nan: 1.0.0
+      options: 0.0.6
+      tinycolor: 0.0.1
+    optionalDependencies:
+      bufferutil: 4.0.9
+
+  ws@7.5.10(bufferutil@4.0.9):
+    optionalDependencies:
+      bufferutil: 4.0.9
+
+  ws@8.18.3(bufferutil@4.0.9):
+    optionalDependencies:
+      bufferutil: 4.0.9
 
   yallist@5.0.0: {}
