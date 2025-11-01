@@ -22,7 +22,8 @@ let highlightedPlayerId = null; // ID игрока с зеленой рамко�
 let disconnectedPlayers = new Map(); // Map: nickname -> {characteristics, id, role}
 let usedCards = {}; // Map: category -> Set of used card values (для отслеживания уникальных карт)
 let votingState = {
-  active: false,
+  phase: null, // null | "selection" | "voting" - этап голосования
+  candidates: new Set(), // Set из ID игроков, выставленных на голосование
   votes: new Map(), // Map: voterId -> targetPlayerId (кто за кого проголосовал)
   voteCounts: {} // Объект: targetPlayerId -> количество голосов
 };
@@ -613,7 +614,9 @@ function sendPlayersUpdate() {
       currentRound: gameState.currentRound,
       totalRounds: gameState.totalRounds,
       highlightedPlayerId: highlightedPlayerId,
-      votingActive: votingState.active,
+      votingActive: votingState.phase === "voting",
+      votingPhase: votingState.phase, // "selection" | "voting" | null
+      votingCandidates: Array.from(votingState.candidates), // Массив ID кандидатов
       votedPlayers: Array.from(votingState.votes.keys()), // Список ID проголосовавших игроков
       voteCounts: votingState.voteCounts // Результаты голосования
     }));
@@ -642,7 +645,9 @@ function sendPlayersUpdate() {
       currentRound: gameState.currentRound,
       totalRounds: gameState.totalRounds,
       highlightedPlayerId: highlightedPlayerId,
-      votingActive: votingState.active,
+      votingActive: votingState.phase === "voting",
+      votingPhase: votingState.phase, // "selection" | "voting" | null
+      votingCandidates: Array.from(votingState.candidates), // Массив ID кандидатов
       votedPlayers: Array.from(votingState.votes.keys()), // Список ID проголосовавших игроков
       voteCounts: votingState.voteCounts // Результаты голосования
   });
@@ -652,7 +657,7 @@ function sendPlayersUpdate() {
 // 🗳️ Проверка завершения голосования
 // ============================
 function checkVotingComplete() {
-  if (!votingState.active) return;
+  if (votingState.phase !== "voting") return;
   
   const activePlayers = allPlayers.filter(p => 
     p.readyState === WebSocket.OPEN && 
@@ -668,23 +673,31 @@ function checkVotingComplete() {
   if (allVoted && activePlayers.length > 0) {
     console.log(`🗳️ Все игроки проголосовали. Подсчитываем результаты...`);
     
-    // Находим максимальное количество голосов
-    const maxVotes = Math.max(...Object.values(votingState.voteCounts), 0);
+    // Находим максимальное количество голосов (только среди кандидатов)
+    const candidateVotes = Object.entries(votingState.voteCounts)
+      .filter(([playerId]) => votingState.candidates.has(playerId));
+    const maxVotes = candidateVotes.length > 0 
+      ? Math.max(...candidateVotes.map(([, count]) => count), 0)
+      : 0;
     
     if (maxVotes === 0) {
       // Никто не получил голосов
-      votingState.active = false;
+      votingState.phase = null;
+      votingState.candidates.clear();
       
-      // Собираем полные результаты голосования (все игроки с количеством голосов)
+      // Собираем полные результаты голосования (только кандидаты)
       const allConnections = [...allPlayers, host];
-      const allVotingResults = allConnections
-        .filter(p => p && p.role !== "host")
-        .map(player => ({
-          id: player.id,
-          name: player.name,
-          votes: 0
-        }))
-        .sort((a, b) => b.votes - a.votes); // Сортируем от самых проголосованных до наименее
+      const allVotingResults = Array.from(votingState.candidates)
+        .map(candidateId => {
+          const player = allConnections.find(p => p && p.id === candidateId);
+          return player ? {
+            id: candidateId,
+            name: player.name,
+            votes: 0
+          } : null;
+        })
+        .filter(p => p !== null)
+        .sort((a, b) => b.votes - a.votes);
       
       // Сохраняем в историю
       const historyEntry = {
@@ -701,9 +714,9 @@ function checkVotingComplete() {
         allResults: allVotingResults
       });
     } else {
-      // Находим всех игроков с максимальным количеством голосов
+      // Находим всех игроков с максимальным количеством голосов (только среди кандидатов)
       const candidates = Object.entries(votingState.voteCounts)
-        .filter(([playerId, count]) => count === maxVotes)
+        .filter(([playerId, count]) => count === maxVotes && votingState.candidates.has(playerId))
         .map(([playerId]) => {
           const allConnections = [...allPlayers, host];
           const player = allConnections.find(p => p && p.id === playerId);
@@ -711,20 +724,27 @@ function checkVotingComplete() {
         })
         .filter(p => p !== null);
       
-      votingState.active = false;
+      // Сохраняем список кандидатов до очистки
+      const candidatesList = Array.from(votingState.candidates);
+      
+      votingState.phase = null;
+      votingState.candidates.clear();
       
       console.log(`🗳️ Результаты голосования: ${candidates.length} кандидат(ов) с ${maxVotes} голос(ами)`);
       
-      // Собираем полные результаты голосования (все игроки с количеством голосов)
+      // Собираем полные результаты голосования (только кандидаты)
       const allConnections = [...allPlayers, host];
-      const allVotingResults = allConnections
-        .filter(p => p && p.role !== "host")
-        .map(player => ({
-          id: player.id,
-          name: player.name,
-          votes: votingState.voteCounts[player.id] || 0
-        }))
-        .sort((a, b) => b.votes - a.votes); // Сортируем от самых проголосованных до наименее
+      const allVotingResults = candidatesList
+        .map(candidateId => {
+          const player = allConnections.find(p => p && p.id === candidateId);
+          return player ? {
+            id: candidateId,
+            name: player.name,
+            votes: votingState.voteCounts[candidateId] || 0
+          } : null;
+        })
+        .filter(p => p !== null)
+        .sort((a, b) => b.votes - a.votes);
       
       // Сохраняем в историю
       const historyEntry = {
@@ -749,11 +769,12 @@ function checkVotingComplete() {
         type: "voting_completed",
         message: resultMessage,
         candidates: candidates,
-        allResults: allVotingResults // Полные результаты для модального окна
+        allResults: allVotingResults
       });
       
       // Если несколько кандидатов - хост должен выбрать
       if (candidates.length > 1) {
+        const hostConnection = allPlayers.find(p => p.role === "host" && p.readyState === WebSocket.OPEN) || host;
         if (hostConnection) {
           hostConnection.send(JSON.stringify({
             type: "voting_tie",
@@ -1370,8 +1391,9 @@ wss.on("connection", (ws) => {
             }
             
             // Сбрасываем голосование при смене раунда
-            if (votingState.active) {
-              votingState.active = false;
+            if (votingState.phase !== null) {
+              votingState.phase = null;
+              votingState.candidates.clear();
               votingState.votes.clear();
               votingState.voteCounts = {};
               console.log(`🔄 Голосование сброшено при смене раунда`);
@@ -1393,36 +1415,99 @@ wss.on("connection", (ws) => {
           break;
         }
 
-        // 🗳️ Запуск голосования на вылет
-        case "start_voting": {
+        // 🗳️ Начало этапа выбора кандидатов на голосование
+        case "start_voting_selection": {
           // Разрешаем только ведущему
           if (ws.role === "host") {
-            if (votingState.active) {
+            if (votingState.phase !== null) {
               ws.send(JSON.stringify({ type: "error", message: "Голосование уже активно" }));
               return;
             }
             
-            const activePlayers = allPlayers.filter(p => p.readyState === WebSocket.OPEN && p.role !== "host");
+            const activePlayers = allPlayers.filter(p => p.readyState === WebSocket.OPEN && p.role !== "host" && !bannedPlayers.has(p.id));
             if (activePlayers.length < 2) {
               ws.send(JSON.stringify({ type: "error", message: "Для голосования нужно минимум 2 игрока" }));
               return;
             }
             
-            // Сбрасываем предыдущее голосование
-            votingState.active = true;
+            // Начинаем этап выбора кандидатов
+            votingState.phase = "selection";
+            votingState.candidates.clear();
             votingState.votes.clear();
             votingState.voteCounts = {};
             
-            console.log(`🗳️ Голосование на вылет начато`);
+            console.log(`🗳️ Начался этап выбора кандидатов для голосования`);
+            
+            sendPlayersUpdate();
+          } else {
+            ws.send(JSON.stringify({ type: "error", message: "Только ведущий может начать выбор кандидатов" }));
+          }
+          break;
+        }
+
+        // 🗳️ Установка списка кандидатов (хост выбирает кандидатов)
+        case "set_voting_candidates": {
+          // Разрешаем только ведущему
+          if (ws.role === "host") {
+            if (votingState.phase !== "selection") {
+              ws.send(JSON.stringify({ type: "error", message: "Этап выбора кандидатов не активен" }));
+              return;
+            }
+            
+            const candidates = data.candidates || [];
+            if (!Array.isArray(candidates)) {
+              ws.send(JSON.stringify({ type: "error", message: "Неверный формат списка кандидатов" }));
+              return;
+            }
+            
+            // Проверяем, что все кандидаты существуют и не изгнаны
+            const allConnections = [...allPlayers, host];
+            const validCandidates = candidates.filter(candidateId => {
+              const player = allConnections.find(p => p && p.id === candidateId);
+              return player && player.role !== "host" && !bannedPlayers.has(candidateId);
+            });
+            
+            votingState.candidates = new Set(validCandidates);
+            
+            console.log(`🗳️ Хост выбрал ${validCandidates.length} кандидатов для голосования`);
+            
+            sendPlayersUpdate();
+          } else {
+            ws.send(JSON.stringify({ type: "error", message: "Только ведущий может выбрать кандидатов" }));
+          }
+          break;
+        }
+
+        // 🗳️ Подтверждение списка кандидатов и начало голосования
+        case "confirm_voting_candidates": {
+          // Разрешаем только ведущему
+          if (ws.role === "host") {
+            if (votingState.phase !== "selection") {
+              ws.send(JSON.stringify({ type: "error", message: "Этап выбора кандидатов не активен" }));
+              return;
+            }
+            
+            if (votingState.candidates.size < 1) {
+              ws.send(JSON.stringify({ type: "error", message: "Выберите хотя бы одного кандидата" }));
+              return;
+            }
+            
+            // Переходим к этапу голосования
+            votingState.phase = "voting";
+            votingState.votes.clear();
+            votingState.voteCounts = {};
+            
+            console.log(`🗳️ Голосование началось с ${votingState.candidates.size} кандидатами`);
             
             broadcast({
               type: "voting_started",
-              message: "Началось голосование на вылет"
+              message: "Началось голосование на вылет",
+              candidates: Array.from(votingState.candidates)
             });
             
             sendPlayersUpdate();
           } else {
-            ws.send(JSON.stringify({ type: "error", message: "Только ведущий может запустить голосование" }));
+            ws.send(JSON.stringify({ type: "error", message: "Только ведущий может подтвердить кандидатов" }));
           }
           break;
         }
@@ -1431,13 +1516,14 @@ wss.on("connection", (ws) => {
         case "cancel_voting": {
           // Разрешаем только ведущему
           if (ws.role === "host") {
-            if (!votingState.active) {
+            if (votingState.phase === null) {
               ws.send(JSON.stringify({ type: "error", message: "Голосование не активно" }));
               return;
             }
             
             // Сбрасываем голосование
-            votingState.active = false;
+            votingState.phase = null;
+            votingState.candidates.clear();
             votingState.votes.clear();
             votingState.voteCounts = {};
             
@@ -1457,13 +1543,14 @@ wss.on("connection", (ws) => {
 
         // 🗳️ Голос игрока за вылет другого игрока
         case "vote_to_kick": {
-          if (!votingState.active) {
+          if (votingState.phase !== "voting") {
             ws.send(JSON.stringify({ type: "error", message: "Голосование не активно" }));
             return;
           }
           
-          if (!ws.name || ws.role === "host") {
-            ws.send(JSON.stringify({ type: "error", message: "Только игроки могут голосовать" }));
+          // Хост не может голосовать
+          if (ws.role === "host") {
+            ws.send(JSON.stringify({ type: "error", message: "Хост не может голосовать" }));
             return;
           }
           
@@ -1479,23 +1566,23 @@ wss.on("connection", (ws) => {
             return;
           }
           
+          // Проверяем, что цель находится в списке кандидатов
+          if (!votingState.candidates.has(targetPlayerId)) {
+            ws.send(JSON.stringify({ type: "error", message: "Этот игрок не выставлен на голосование" }));
+            return;
+          }
+          
           // Проверяем, что игрок еще не голосовал
           if (votingState.votes.has(ws.id)) {
             ws.send(JSON.stringify({ type: "error", message: "Вы уже проголосовали" }));
             return;
           }
           
-          // Проверяем, что цель существует
+          // Проверяем, что цель существует и не изгнана
           const allConnections = [...allPlayers, host];
           const targetPlayer = allConnections.find(p => p && p.id === targetPlayerId);
-          if (!targetPlayer || targetPlayer.role === "host") {
+          if (!targetPlayer || bannedPlayers.has(targetPlayerId)) {
             ws.send(JSON.stringify({ type: "error", message: "Неверный игрок для голосования" }));
-            return;
-          }
-          
-          // Проверяем, что цель не изгнана
-          if (bannedPlayers.has(targetPlayerId)) {
-            ws.send(JSON.stringify({ type: "error", message: "Нельзя голосовать за изгнанного игрока" }));
             return;
           }
           
@@ -1558,7 +1645,8 @@ wss.on("connection", (ws) => {
             gameState.currentRound = 0; // Сбрасываем раунд
             highlightedPlayerId = null; // Сбрасываем зеленую рамку
             // Сбрасываем голосование
-            votingState.active = false;
+            votingState.phase = null;
+            votingState.candidates.clear();
             votingState.votes.clear();
             votingState.voteCounts = {};
             votingHistory = []; // Сбрасываем историю голосований
