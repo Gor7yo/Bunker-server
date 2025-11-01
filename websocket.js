@@ -1,8 +1,8 @@
 // server.js
 const WebSocket = require("ws");
 const propertiesData = require("./properties.json");
-const janusClient = require("./janus-client");
-const { handleJanusMessage } = require("./janus-handlers");
+const mediasoupServer = require("./mediasoup-server");
+const { handleMediasoupMessage } = require("./mediasoup-handlers");
 
 const wss = new WebSocket.Server({ port: 5000 }, () =>
   console.log("✅ Сервер запущен на порту 5000")
@@ -668,17 +668,11 @@ function checkVotingComplete() {
     !bannedPlayers.has(p.id) // Исключаем изгнанных игроков
   );
   
-  // Если только один кандидат, исключаем его из списка тех, кто должен голосовать
-  // (так как его голос не учитывается)
-  const votersToCheck = votingState.candidates.size === 1
-    ? activePlayers.filter(p => !votingState.candidates.has(p.id))
-    : activePlayers;
+  // Все активные игроки проголосовали
+  const allVoted = activePlayers.length > 0 && 
+    activePlayers.every(p => votingState.votes.has(p.id));
   
-  // Все активные игроки (кроме единственного кандидата, если он один) проголосовали
-  const allVoted = votersToCheck.length > 0 && 
-    votersToCheck.every(p => votingState.votes.has(p.id));
-  
-  if (allVoted && votersToCheck.length > 0) {
+  if (allVoted && activePlayers.length > 0) {
     console.log(`🗳️ Все игроки проголосовали. Подсчитываем результаты...`);
     
     // Находим максимальное количество голосов (только среди кандидатов)
@@ -688,70 +682,7 @@ function checkVotingComplete() {
       ? Math.max(...candidateVotes.map(([, count]) => count), 0)
       : 0;
     
-    // Если только один кандидат, проверяем, был ли он автоматически изгнан
-    const isSingleCandidate = votingState.candidates.size === 1;
-    
-    if (maxVotes === 0 || (isSingleCandidate && maxVotes > 0)) {
-      // Никто не получил голосов ИЛИ один кандидат получил голоса (но его голос не учитывался)
-      // В случае одного кандидата - переходим к следующему этапу (хост решает)
-      if (isSingleCandidate && maxVotes > 0) {
-        // Находим единственного кандидата
-        const candidateId = Array.from(votingState.candidates)[0];
-        const allConnections = [...allPlayers, host];
-        const candidate = allConnections.find(p => p && p.id === candidateId);
-        
-        if (candidate) {
-          const candidates = [{
-            id: candidateId,
-            name: candidate.name,
-            votes: maxVotes
-          }];
-          
-          // Собираем полные результаты
-          const allVotingResults = candidates.map(c => ({
-            id: c.id,
-            name: c.name,
-            votes: c.votes
-          }));
-          
-          // Сохраняем в историю
-          const historyEntry = {
-            timestamp: Date.now(),
-            results: allVotingResults,
-            candidates: candidates
-          };
-          votingHistory.push(historyEntry);
-          
-          votingState.phase = null;
-          const candidatesList = Array.from(votingState.candidates);
-          votingState.candidates.clear();
-          
-          // Отправляем результаты хосту для принятия решения
-          const hostConnection = allPlayers.find(p => p.role === "host" && p.readyState === WebSocket.OPEN) || host;
-          if (hostConnection) {
-            hostConnection.send(JSON.stringify({
-              type: "voting_tie",
-              message: `Голосование завершено. Кандидат: ${candidate.name} (${maxVotes} голос(ов)). Ваш голос не учитывался.`,
-              candidates: candidates,
-              allResults: allVotingResults
-            }));
-          }
-          
-          broadcast({
-            type: "voting_completed",
-            message: `Голосование на вылет завершено. Кандидат: ${candidate.name} (${maxVotes} голос(ов)).`,
-            candidates: candidates,
-            allResults: allVotingResults
-          });
-          
-          // Сбрасываем голосование
-          votingState.votes.clear();
-          votingState.voteCounts = {};
-          sendPlayersUpdate();
-          return;
-        }
-      }
-      
+    if (maxVotes === 0) {
       // Никто не получил голосов
       votingState.phase = null;
       votingState.candidates.clear();
@@ -893,30 +824,32 @@ function checkAllReady() {
     gameState.startTime = Date.now(); // Запоминаем время начала игры
     gameState.ready = false; // Сбрасываем готовность (админ еще не нажал "Начать")
     gameState.currentRound = 0; // Сбрасываем раунд при начале игры
-    console.log("🎮 Игра началась! Генерируем карты и подключаем к Janus SFU...");
+    console.log("🎮 Игра началась! Генерируем карты и подключаем к Mediasoup SFU...");
     
     // Генерируем карты для всех игроков
     generateAllPlayerCards();
     
-    // Подключаем всех игроков к Janus SFU
+    // Подключаем всех игроков к Mediasoup SFU
     const allConnections = [...allPlayers, host].filter(p => p && p.readyState === WebSocket.OPEN);
+    
+    // Отправляем RTP capabilities всем игрокам
+    const rtpCapabilities = mediasoupServer.getRouterRtpCapabilities();
+    
     allConnections.forEach(async (player) => {
       try {
-        const janusInfo = await janusClient.joinAsPublisher(player.id, 'bunker-game');
-        if (janusInfo) {
-          // Отправляем игроку информацию для подключения к Janus
-          player.send(JSON.stringify({
-            type: "janus_connect",
-            sessionId: janusInfo.sessionId,
-            handleId: janusInfo.handleId,
-            roomId: janusInfo.roomId,
-            jsep: janusInfo.jsep,
-            janusWsUrl: process.env.JANUS_WS_URL || 'ws://localhost:8188'
-          }));
-          console.log(`✅ Игрок ${player.name} (${player.id}) подключен к Janus SFU`);
-        }
+        // Подключаем игрока к Mediasoup
+        const transportInfo = await mediasoupServer.connectPlayer(player.id);
+        
+        // Отправляем игроку информацию для подключения к Mediasoup
+        player.send(JSON.stringify({
+          type: "mediasoup_connect",
+          rtpCapabilities: rtpCapabilities,
+          sendTransport: transportInfo.sendTransport,
+          recvTransport: transportInfo.recvTransport,
+        }));
+        console.log(`✅ Игрок ${player.name} (${player.id}) подключен к Mediasoup SFU`);
       } catch (error) {
-        console.error(`❌ Ошибка подключения игрока ${player.name} к Janus:`, error);
+        console.error(`❌ Ошибка подключения игрока ${player.name} к Mediasoup:`, error);
       }
     });
     
@@ -928,11 +861,11 @@ function checkAllReady() {
     // Отправляем обновленные данные игроков с характеристиками
     sendPlayersUpdate();
     
-    // Даем время на установку WebRTC соединений через Janus
+    // Даем время на установку WebRTC соединений
     setTimeout(() => {
       broadcast({
         type: "game_message", 
-        message: "Проверьте видео соединения"
+        message: "Проверьте видео и аудио соединения"
       });
     }, 3000);
   }
@@ -982,8 +915,8 @@ wss.on("connection", (ws) => {
     try {
       const data = JSON.parse(message);
 
-      // Обработка сообщений Janus SFU
-      if (handleJanusMessage(ws, data, allPlayers, host)) {
+      // Обработка сообщений Mediasoup SFU
+      if (handleMediasoupMessage(ws, data, allPlayers, host)) {
         return; // Сообщение обработано
       }
 
@@ -1031,17 +964,8 @@ wss.on("connection", (ws) => {
             return;
           }
 
-          // Если у игрока уже есть имя (изменение никнейма)
+          // Если у игрока уже есть имя
           if (ws.name) {
-            // Проверяем, не занят ли новый никнейм
-            const activePlayers = [...allPlayers, host].filter(p => p && p.readyState === WebSocket.OPEN);
-            const existingPlayer = activePlayers.find(p => p.name && p.name.toLowerCase() === nickname.toLowerCase() && p.id !== ws.id);
-            
-            if (existingPlayer) {
-              ws.send(JSON.stringify({ type: "error", message: "Никнейм уже занят" }));
-              return;
-            }
-            
             if (ws.name !== nickname) {
               ws.name = nickname;
               sendPlayersUpdate();
@@ -1049,12 +973,21 @@ wss.on("connection", (ws) => {
             return;
           }
 
-          // 🔄 СНАЧАЛА: Проверяем переподключение (сохраненные данные)
+          // Проверка на дубликаты имен среди активных игроков
+          const activePlayers = [...allPlayers, host].filter(p => p && p.readyState === WebSocket.OPEN);
+          const existingPlayer = activePlayers.find(p => p.name && p.name.toLowerCase() === nickname.toLowerCase());
+          
+          if (existingPlayer && existingPlayer.id !== ws.id) {
+            ws.send(JSON.stringify({ type: "error", message: "Никнейм уже занят" }));
+            return;
+          }
+
+          // 🔄 ПЕРЕЗАХОД: Проверяем, есть ли сохраненные данные для этого никнейма
           const disconnectedData = disconnectedPlayers.get(nickname.toLowerCase());
           let isReconnecting = false;
           
           if (disconnectedData && gameState.started) {
-            // Восстанавливаем данные игрока при переподключении
+            // Восстанавливаем данные игрока
             console.log(`🔄 Игрок ${nickname} переподключается, восстанавливаем данные...`);
             isReconnecting = true;
             
@@ -1079,15 +1012,6 @@ wss.on("connection", (ws) => {
               characteristicsCount: ws.characteristics ? Object.keys(ws.characteristics).length : 0
             });
           } else {
-            // Проверка на дубликаты имен среди активных игроков (только если не переподключение)
-            const activePlayers = [...allPlayers, host].filter(p => p && p.readyState === WebSocket.OPEN);
-            const existingPlayer = activePlayers.find(p => p.name && p.name.toLowerCase() === nickname.toLowerCase());
-            
-            if (existingPlayer && existingPlayer.id !== ws.id) {
-              ws.send(JSON.stringify({ type: "error", message: "Никнейм уже занят" }));
-              return;
-            }
-            
             // Обычный вход - просто устанавливаем имя
             ws.name = nickname;
           }
@@ -1137,8 +1061,7 @@ wss.on("connection", (ws) => {
             if (!allPlayers.includes(ws)) {
               const activeRegularPlayers = allPlayers.filter(p => p.readyState === WebSocket.OPEN);
               
-              // Проверяем лимит только если игра не началась (во время игры можно заходить для переподключений и новых игроков)
-              if (activeRegularPlayers.length >= MAX_PLAYERS && !isReconnecting && !gameState.started) {
+              if (activeRegularPlayers.length >= MAX_PLAYERS && !isReconnecting) {
                 ws.send(JSON.stringify({ 
                   type: "error", 
                   message: `Лобби заполнено (максимум ${MAX_PLAYERS} игроков)` 
@@ -1161,18 +1084,13 @@ wss.on("connection", (ws) => {
             if (gameState.started) {
               console.log(`🎮 Игрок ${ws.name} заходит в уже начатую игру`);
               
-              // Если это не переподключение и у игрока нет карточек (заходит впервые во время игры), генерируем их
-              if (!isReconnecting && !ws.characteristics) {
+              // Если у игрока нет карточек (заходит впервые во время игры), генерируем их
+              if (!ws.characteristics) {
                 console.log(`🎲 Генерируем карты для игрока ${ws.name} (заход во время игры)`);
                 ws.characteristics = generatePlayerCharacteristics();
                 // Помечаем карты как использованные
                 markPlayerCardsAsUsed(ws.characteristics);
                 // Отправляем обновление сразу
-                sendPlayersUpdate();
-              }
-              
-              // Если это переподключение, отправляем обновление чтобы показать восстановленные данные
-              if (isReconnecting) {
                 sendPlayersUpdate();
               }
               
@@ -1702,20 +1620,13 @@ wss.on("connection", (ws) => {
           // Записываем голос
           votingState.votes.set(ws.id, targetPlayerId);
           
-          // Если только один кандидат и голосующий - это кандидат, его голос не учитывается
-          const isSingleCandidate = votingState.candidates.size === 1;
-          const voterIsCandidate = votingState.candidates.has(ws.id);
-          
-          // Обновляем счетчики голосов (только если голос не от кандидата при одном кандидате)
-          if (!(isSingleCandidate && voterIsCandidate)) {
-            if (!votingState.voteCounts[targetPlayerId]) {
-              votingState.voteCounts[targetPlayerId] = 0;
-            }
-            votingState.voteCounts[targetPlayerId]++;
-            console.log(`🗳️ ${ws.name} проголосовал за вылет ${targetPlayer.name}`);
-          } else {
-            console.log(`🗳️ ${ws.name} проголосовал за вылет ${targetPlayer.name}, но его голос не учитывается (единственный кандидат)`);
+          // Обновляем счетчики голосов
+          if (!votingState.voteCounts[targetPlayerId]) {
+            votingState.voteCounts[targetPlayerId] = 0;
           }
+          votingState.voteCounts[targetPlayerId]++;
+          
+          console.log(`🗳️ ${ws.name} проголосовал за вылет ${targetPlayer.name}`);
           
           // Отправляем обновление всем
           sendPlayersUpdate();
@@ -1813,9 +1724,9 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     console.log(`❌ Отключился: ${ws.name || 'Unknown'} (${ws.role})`);
     
-    // Отключаем от Janus SFU
-    janusClient.leaveRoom(ws.id).catch(err => {
-      console.error(`⚠️ Ошибка отключения от Janus:`, err);
+    // Отключаем от Mediasoup SFU
+    mediasoupServer.disconnectPlayer(ws.id).catch(err => {
+      console.error(`⚠️ Ошибка отключения от Mediasoup:`, err);
     });
     
     // 💾 Сохраняем данные игрока перед отключением (если игра началась)
