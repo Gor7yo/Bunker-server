@@ -1,6 +1,8 @@
 // server.js
 const WebSocket = require("ws");
 const propertiesData = require("./properties.json");
+const janusClient = require("./janus-client");
+const { handleJanusMessage } = require("./janus-handlers");
 
 const wss = new WebSocket.Server({ port: 5000 }, () =>
   console.log("✅ Сервер запущен на порту 5000")
@@ -891,24 +893,46 @@ function checkAllReady() {
     gameState.startTime = Date.now(); // Запоминаем время начала игры
     gameState.ready = false; // Сбрасываем готовность (админ еще не нажал "Начать")
     gameState.currentRound = 0; // Сбрасываем раунд при начале игры
-    console.log("🎮 Игра началась! Генерируем карты и устанавливаем WebRTC соединения...");
+    console.log("🎮 Игра началась! Генерируем карты и подключаем к Janus SFU...");
     
     // Генерируем карты для всех игроков
     generateAllPlayerCards();
     
+    // Подключаем всех игроков к Janus SFU
+    const allConnections = [...allPlayers, host].filter(p => p && p.readyState === WebSocket.OPEN);
+    allConnections.forEach(async (player) => {
+      try {
+        const janusInfo = await janusClient.joinAsPublisher(player.id, 'bunker-game');
+        if (janusInfo) {
+          // Отправляем игроку информацию для подключения к Janus
+          player.send(JSON.stringify({
+            type: "janus_connect",
+            sessionId: janusInfo.sessionId,
+            handleId: janusInfo.handleId,
+            roomId: janusInfo.roomId,
+            jsep: janusInfo.jsep,
+            janusWsUrl: process.env.JANUS_WS_URL || 'ws://localhost:8188'
+          }));
+          console.log(`✅ Игрок ${player.name} (${player.id}) подключен к Janus SFU`);
+        }
+      } catch (error) {
+        console.error(`❌ Ошибка подключения игрока ${player.name} к Janus:`, error);
+      }
+    });
+    
     broadcast({ 
       type: "game_started",
-      message: "Игра начинается! Карты сгенерированы, устанавливаем видеосвязь..."
+      message: "Игра начинается! Карты сгенерированы, подключаемся к видеосерверу..."
     });
     
     // Отправляем обновленные данные игроков с характеристиками
     sendPlayersUpdate();
     
-    // Даем время на установку WebRTC соединений
+    // Даем время на установку WebRTC соединений через Janus
     setTimeout(() => {
       broadcast({
         type: "game_message", 
-        message: "Проверьте видео и аудио соединения"
+        message: "Проверьте видео соединения"
       });
     }, 3000);
   }
@@ -957,6 +981,11 @@ wss.on("connection", (ws) => {
   ws.on("message", (message) => {
     try {
       const data = JSON.parse(message);
+
+      // Обработка сообщений Janus SFU
+      if (handleJanusMessage(ws, data, allPlayers, host)) {
+        return; // Сообщение обработано
+      }
 
       switch (data.type) {
         // 🎛️ Вход в админ-панель (отдельное подключение, не считается игроком)
@@ -1783,6 +1812,11 @@ wss.on("connection", (ws) => {
   // ❌ Отключение клиента
   ws.on("close", () => {
     console.log(`❌ Отключился: ${ws.name || 'Unknown'} (${ws.role})`);
+    
+    // Отключаем от Janus SFU
+    janusClient.leaveRoom(ws.id).catch(err => {
+      console.error(`⚠️ Ошибка отключения от Janus:`, err);
+    });
     
     // 💾 Сохраняем данные игрока перед отключением (если игра началась)
     // НЕ сохраняем для админ-панели
