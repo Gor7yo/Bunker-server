@@ -666,11 +666,17 @@ function checkVotingComplete() {
     !bannedPlayers.has(p.id) // Исключаем изгнанных игроков
   );
   
-  // Все активные игроки проголосовали
-  const allVoted = activePlayers.length > 0 && 
-    activePlayers.every(p => votingState.votes.has(p.id));
+  // Если только один кандидат, исключаем его из списка тех, кто должен голосовать
+  // (так как его голос не учитывается)
+  const votersToCheck = votingState.candidates.size === 1
+    ? activePlayers.filter(p => !votingState.candidates.has(p.id))
+    : activePlayers;
   
-  if (allVoted && activePlayers.length > 0) {
+  // Все активные игроки (кроме единственного кандидата, если он один) проголосовали
+  const allVoted = votersToCheck.length > 0 && 
+    votersToCheck.every(p => votingState.votes.has(p.id));
+  
+  if (allVoted && votersToCheck.length > 0) {
     console.log(`🗳️ Все игроки проголосовали. Подсчитываем результаты...`);
     
     // Находим максимальное количество голосов (только среди кандидатов)
@@ -680,7 +686,70 @@ function checkVotingComplete() {
       ? Math.max(...candidateVotes.map(([, count]) => count), 0)
       : 0;
     
-    if (maxVotes === 0) {
+    // Если только один кандидат, проверяем, был ли он автоматически изгнан
+    const isSingleCandidate = votingState.candidates.size === 1;
+    
+    if (maxVotes === 0 || (isSingleCandidate && maxVotes > 0)) {
+      // Никто не получил голосов ИЛИ один кандидат получил голоса (но его голос не учитывался)
+      // В случае одного кандидата - переходим к следующему этапу (хост решает)
+      if (isSingleCandidate && maxVotes > 0) {
+        // Находим единственного кандидата
+        const candidateId = Array.from(votingState.candidates)[0];
+        const allConnections = [...allPlayers, host];
+        const candidate = allConnections.find(p => p && p.id === candidateId);
+        
+        if (candidate) {
+          const candidates = [{
+            id: candidateId,
+            name: candidate.name,
+            votes: maxVotes
+          }];
+          
+          // Собираем полные результаты
+          const allVotingResults = candidates.map(c => ({
+            id: c.id,
+            name: c.name,
+            votes: c.votes
+          }));
+          
+          // Сохраняем в историю
+          const historyEntry = {
+            timestamp: Date.now(),
+            results: allVotingResults,
+            candidates: candidates
+          };
+          votingHistory.push(historyEntry);
+          
+          votingState.phase = null;
+          const candidatesList = Array.from(votingState.candidates);
+          votingState.candidates.clear();
+          
+          // Отправляем результаты хосту для принятия решения
+          const hostConnection = allPlayers.find(p => p.role === "host" && p.readyState === WebSocket.OPEN) || host;
+          if (hostConnection) {
+            hostConnection.send(JSON.stringify({
+              type: "voting_tie",
+              message: `Голосование завершено. Кандидат: ${candidate.name} (${maxVotes} голос(ов)). Ваш голос не учитывался.`,
+              candidates: candidates,
+              allResults: allVotingResults
+            }));
+          }
+          
+          broadcast({
+            type: "voting_completed",
+            message: `Голосование на вылет завершено. Кандидат: ${candidate.name} (${maxVotes} голос(ов)).`,
+            candidates: candidates,
+            allResults: allVotingResults
+          });
+          
+          // Сбрасываем голосование
+          votingState.votes.clear();
+          votingState.voteCounts = {};
+          sendPlayersUpdate();
+          return;
+        }
+      }
+      
       // Никто не получил голосов
       votingState.phase = null;
       votingState.candidates.clear();
@@ -1589,13 +1658,20 @@ wss.on("connection", (ws) => {
           // Записываем голос
           votingState.votes.set(ws.id, targetPlayerId);
           
-          // Обновляем счетчики голосов
-          if (!votingState.voteCounts[targetPlayerId]) {
-            votingState.voteCounts[targetPlayerId] = 0;
-          }
-          votingState.voteCounts[targetPlayerId]++;
+          // Если только один кандидат и голосующий - это кандидат, его голос не учитывается
+          const isSingleCandidate = votingState.candidates.size === 1;
+          const voterIsCandidate = votingState.candidates.has(ws.id);
           
-          console.log(`🗳️ ${ws.name} проголосовал за вылет ${targetPlayer.name}`);
+          // Обновляем счетчики голосов (только если голос не от кандидата при одном кандидате)
+          if (!(isSingleCandidate && voterIsCandidate)) {
+            if (!votingState.voteCounts[targetPlayerId]) {
+              votingState.voteCounts[targetPlayerId] = 0;
+            }
+            votingState.voteCounts[targetPlayerId]++;
+            console.log(`🗳️ ${ws.name} проголосовал за вылет ${targetPlayer.name}`);
+          } else {
+            console.log(`🗳️ ${ws.name} проголосовал за вылет ${targetPlayer.name}, но его голос не учитывается (единственный кандидат)`);
+          }
           
           // Отправляем обновление всем
           sendPlayersUpdate();
