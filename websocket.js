@@ -811,178 +811,6 @@ function checkVotingComplete() {
 }
 
 // ============================
-// 🎥 Обработка Mediasoup запросов
-// ============================
-async function handleMediasoupRequest(ws, data) {
-  const { requestType, requestId } = data;
-  
-  try {
-    // Получение RTP capabilities
-    if (requestType === 'getRouterRtpCapabilities') {
-      const rtpCapabilities = mediasoupServer.getRouterRtpCapabilities();
-      ws.send(JSON.stringify({
-        type: 'mediasoup',
-        requestId,
-        data: { rtpCapabilities }
-      }));
-      return;
-    }
-    
-    // Создание send transport
-    if (requestType === 'createSendTransport') {
-      const transport = await mediasoupServer.createWebRtcTransport(ws.id);
-      ws.transport = transport; // Сохраняем транспорт
-      
-      ws.send(JSON.stringify({
-        type: 'mediasoup',
-        requestId,
-        data: {
-          transportParams: {
-            id: transport.id,
-            iceParameters: transport.iceParameters,
-            iceCandidates: transport.iceCandidates,
-            dtlsParameters: transport.dtlsParameters
-          }
-        }
-      }));
-      return;
-    }
-    
-    // Создание recv transport
-    if (requestType === 'createRecvTransport') {
-      const transport = await mediasoupServer.createWebRtcTransport(ws.id);
-      ws.recvTransport = transport; // Сохраняем транспорт
-      
-      ws.send(JSON.stringify({
-        type: 'mediasoup',
-        requestId,
-        data: {
-          transportParams: {
-            id: transport.id,
-            iceParameters: transport.iceParameters,
-            iceCandidates: transport.iceCandidates,
-            dtlsParameters: transport.dtlsParameters
-          }
-        }
-      }));
-      return;
-    }
-    
-    // Подключение транспорта
-    if (requestType === 'connectSendTransport') {
-      if (!ws.transport) {
-        throw new Error('Transport не найден');
-      }
-      await ws.transport.connect({ dtlsParameters: data.data.dtlsParameters });
-      ws.send(JSON.stringify({ type: 'mediasoup', requestId, data: {} }));
-      return;
-    }
-    
-    if (requestType === 'connectRecvTransport') {
-      if (!ws.recvTransport) {
-        throw new Error('Recv transport не найден');
-      }
-      await ws.recvTransport.connect({ dtlsParameters: data.data.dtlsParameters });
-      ws.send(JSON.stringify({ type: 'mediasoup', requestId, data: {} }));
-      return;
-    }
-    
-    // Создание producer
-    if (requestType === 'produce') {
-      if (!ws.transport) {
-        throw new Error('Transport не найден');
-      }
-      const producer = await mediasoupServer.createProducer(
-        ws.transport,
-        data.data.kind,
-        data.data.rtpParameters
-      );
-      
-      ws.producers = ws.producers || new Map();
-      ws.producers.set(data.data.kind, producer);
-      
-      // Сообщаем всем о новом producer
-      const allConnections = [...allPlayers, host].filter(p => p !== ws);
-      allConnections.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify({
-            type: 'new_producer',
-            producerId: producer.id,
-            producerKind: data.data.kind,
-            playerId: ws.id
-          }));
-        }
-      });
-      
-      ws.send(JSON.stringify({ 
-        type: 'mediasoup', 
-        requestId, 
-        data: { producerId: producer.id } 
-      }));
-      return;
-    }
-    
-    // Создание consumer
-    if (requestType === 'consume') {
-      if (!ws.recvTransport) {
-        throw new Error('Recv transport не найден');
-      }
-      const consumer = await mediasoupServer.createConsumer(
-        ws.recvTransport,
-        data.data.producerId,
-        data.data.rtpCapabilities
-      );
-      
-      ws.consumers = ws.consumers || new Map();
-      ws.consumers.set(data.data.producerId, consumer);
-      
-      ws.send(JSON.stringify({
-        type: 'mediasoup',
-        requestId,
-        data: {
-          consumerParams: {
-            id: consumer.id,
-            producerId: consumer.producerId,
-            kind: consumer.kind,
-            rtpParameters: consumer.rtpParameters
-          }
-        }
-      }));
-      return;
-    }
-    
-    // Возобновление consumer
-    if (requestType === 'consumerResumed') {
-      if (!ws.consumers) {
-        throw new Error('Consumers не найдены');
-      }
-      const consumerId = data.data.consumerId;
-      const consumer = Array.from(ws.consumers.values()).find(c => c.id === consumerId);
-      if (consumer) {
-        await consumer.resume();
-      }
-      ws.send(JSON.stringify({ type: 'mediasoup', requestId, data: {} }));
-      return;
-    }
-    
-    // Ошибка неизвестного запроса
-    ws.send(JSON.stringify({
-      type: 'mediasoup',
-      requestId,
-      error: 'Unknown request type'
-    }));
-    
-  } catch (error) {
-    console.error('❌ Ошибка обработки Mediasoup запроса:', error);
-    ws.send(JSON.stringify({
-      type: 'mediasoup',
-      requestId,
-      error: error.message
-    }));
-  }
-}
-
-// ============================
 // ✅ Проверяем: все ли готовы, и можно ли стартовать
 // ============================
 function checkAllReady() {
@@ -1864,7 +1692,6 @@ wss.on("connection", (ws) => {
           break;
         }
 
-        // 🎥 Mediasoup медиа запросы
         case "mediasoup": {
           handleMediasoupRequest(ws, data);
           break;
@@ -1949,5 +1776,144 @@ wss.on("connection", (ws) => {
     console.error(`💥 Ошибка: ${ws.name || ws.id}`, error);
   });
 });
+
+async function handleMediasoupRequest(ws, data) {
+  const { requestType, requestId } = data;
+  
+  try {
+    if (requestType === 'getRouterRtpCapabilities') {
+      const rtpCapabilities = mediasoupServer.getRouterRtpCapabilities();
+      ws.send(JSON.stringify({ type: 'mediasoup', requestId, data: { rtpCapabilities } }));
+      return;
+    }
+    
+    if (requestType === 'createSendTransport') {
+      const transport = await mediasoupServer.createWebRtcTransport(ws.id);
+      ws.transport = transport;
+      ws.send(JSON.stringify({
+        type: 'mediasoup',
+        requestId,
+        data: {
+          id: transport.id,
+          iceParameters: transport.iceParameters,
+          iceCandidates: transport.iceCandidates,
+          dtlsParameters: transport.dtlsParameters,
+          sctpParameters: transport.sctpParameters
+        }
+      }));
+      return;
+    }
+    
+    if (requestType === 'createRecvTransport') {
+      const transport = await mediasoupServer.createWebRtcTransport(ws.id);
+      ws.recvTransport = transport;
+      ws.send(JSON.stringify({
+        type: 'mediasoup',
+        requestId,
+        data: {
+          id: transport.id,
+          iceParameters: transport.iceParameters,
+          iceCandidates: transport.iceCandidates,
+          dtlsParameters: transport.dtlsParameters,
+          sctpParameters: transport.sctpParameters
+        }
+      }));
+      return;
+    }
+    
+    if (requestType === 'connectSendTransport') {
+      if (!ws.transport) {
+        throw new Error('Transport не найден');
+      }
+      await ws.transport.connect({ dtlsParameters: data.data.dtlsParameters });
+      ws.send(JSON.stringify({ type: 'mediasoup', requestId, data: {} }));
+      return;
+    }
+    
+    if (requestType === 'connectRecvTransport') {
+      if (!ws.recvTransport) {
+        throw new Error('Recv transport не найден');
+      }
+      await ws.recvTransport.connect({ dtlsParameters: data.data.dtlsParameters });
+      ws.send(JSON.stringify({ type: 'mediasoup', requestId, data: {} }));
+      return;
+    }
+    
+    if (requestType === 'produce') {
+      if (!ws.transport) {
+        throw new Error('Transport не найден');
+      }
+      const producer = await mediasoupServer.createProducer(
+        ws.transport,
+        data.data.kind,
+        data.data.rtpParameters
+      );
+      
+      ws.producers = ws.producers || new Map();
+      ws.producers.set(data.data.kind, producer);
+      
+      // Сообщаем всем о новом producer
+      const allConnections = [...allPlayers, host].filter(p => p !== ws);
+      allConnections.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({
+            type: 'new_producer',
+            producerId: producer.id,
+            producerKind: data.data.kind,
+            playerId: ws.id
+          }));
+        }
+      });
+      
+      ws.send(JSON.stringify({ 
+        type: 'mediasoup', 
+        requestId, 
+        data: { producerId: producer.id } 
+      }));
+      return;
+    }
+    
+    if (requestType === 'consume') {
+      if (!ws.recvTransport) {
+        throw new Error('Recv transport не найден');
+      }
+      const consumer = await mediasoupServer.createConsumer(
+        ws.recvTransport,
+        data.data.producerId,
+        data.data.rtpCapabilities
+      );
+      
+      ws.consumers = ws.consumers || new Map();
+      ws.consumers.set(data.data.producerId, consumer);
+      
+      ws.send(JSON.stringify({
+        type: 'mediasoup',
+        requestId,
+        data: {
+          id: consumer.id,
+          producerId: consumer.producerId,
+          kind: consumer.kind,
+          rtpParameters: consumer.rtpParameters
+        }
+      }));
+      return;
+    }
+    
+    if (requestType === 'consumerResumed') {
+      if (!ws.consumers || !ws.consumers.has(data.data.consumerId)) {
+        throw new Error('Consumer не найден');
+      }
+      const consumer = ws.consumers.get(data.data.consumerId);
+      await consumer.resume();
+      ws.send(JSON.stringify({ type: 'mediasoup', requestId, data: {} }));
+      return;
+    }
+    
+    ws.send(JSON.stringify({ type: 'mediasoup', requestId, error: 'Unknown request type' }));
+  } catch (error) {
+    console.error('❌ Ошибка обработки Mediasoup запроса:', error);
+    ws.send(JSON.stringify({ type: 'mediasoup', requestId, error: error.message }));
+  }
+}
 
 console.log("🚀 Сервер 'Бункер' готов для 8 игроков!");

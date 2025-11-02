@@ -1,26 +1,11 @@
-// mediasoup-server.js - Сервер Mediasoup для управления медиа трафиком
-let mediasoup;
-let mediasoupAvailable = false;
-
-try {
-  mediasoup = require('mediasoup');
-  mediasoupAvailable = true;
-  console.log('✅ Mediasoup модуль загружен');
-} catch (error) {
-  console.warn('⚠️ Mediasoup модуль недоступен:', error.message);
-  mediasoupAvailable = false;
-}
-
+// Mediasoup SFU сервер
+const mediasoup = require('mediasoup');
 const config = require('./mediasoup-config');
 
-// Глобальное хранилище медиа-серверов и роутеров
+// Глобальное хранилище
 let workers = [];
 let nextWorkerIndex = 0;
-
-// Глобальный роутер для лобби (SFU - Single Forwarding Unit)
 let lobbyRouter = null;
-
-// Хранилище producers для отслеживания
 const producersMap = new Map(); // producerId -> producer
 
 /**
@@ -29,38 +14,26 @@ const producersMap = new Map(); // producerId -> producer
 async function initializeWorkers() {
   console.log('🔧 Инициализируем Mediasoup воркеры...');
   
-  if (!mediasoupAvailable) {
-    throw new Error('Mediasoup модуль недоступен');
-  }
-  
   for (let i = 0; i < config.numWorkers; i++) {
-    try {
-      const worker = await mediasoup.createWorker({
-        logLevel: config.worker.logLevel,
-        logTags: config.worker.logTags,
-        rtcMinPort: config.worker.rtcMinPort,
-        rtcMaxPort: config.worker.rtcMaxPort,
-        dtlsCertificateFile: undefined, // Mediasoup сам сгенерирует
-        dtlsPrivateKeyFile: undefined
-      });
+    const worker = await mediasoup.createWorker({
+      logLevel: config.worker.logLevel,
+      logTags: config.worker.logTags,
+      rtcMinPort: config.worker.rtcMinPort,
+      rtcMaxPort: config.worker.rtcMaxPort,
+      dtlsCertificateFile: undefined,
+      dtlsPrivateKeyFile: undefined
+    });
 
-      worker.on('died', () => {
-        console.error(`❌ Mediasoup воркер ${i} умер, перезапускаем...`);
-        // Автоматический перезапуск воркера
-        setTimeout(() => initializeWorkers(), 2000);
-      });
+    worker.on('died', () => {
+      console.error(`❌ Mediasoup воркер ${i} умер, перезапускаем...`);
+      setTimeout(() => initializeWorkers(), 2000);
+    });
 
-      workers.push(worker);
-      console.log(`✅ Mediasoup воркер ${i} создан (pid: ${worker.pid})`);
-    } catch (error) {
-      console.error(`❌ Не удалось создать Mediasoup воркер ${i}:`, error.message);
-      throw error; // Пробрасываем дальше
-    }
+    workers.push(worker);
+    console.log(`✅ Mediasoup воркер ${i} создан (pid: ${worker.pid})`);
   }
 
   console.log(`✅ Создано ${workers.length} Mediasoup воркеров`);
-  
-  // Создаем главный роутер для лобби
   await createLobbyRouter();
 }
 
@@ -75,7 +48,7 @@ async function createLobbyRouter() {
   });
 
   console.log('✅ Роутер лобби создан');
-  console.log('📊 Кодекы:', lobbyRouter.rtpCapabilities);
+  console.log('📊 Кодекы:', JSON.stringify(lobbyRouter.rtpCapabilities, null, 2));
 }
 
 /**
@@ -88,110 +61,94 @@ function getNextWorker() {
 }
 
 /**
- * Создание WebRTC транспорт для клиента
+ * Создание WebRTC транспорта для клиента
  */
 async function createWebRtcTransport(socketId) {
   if (!lobbyRouter) {
-    throw new Error('Роутер лобби не создан');
+    throw new Error('Роутер не инициализирован');
   }
 
-  const transport = await lobbyRouter.createWebRtcTransport({
-    listenIps: config.webrtcTransport.listenIps,
-    initialAvailableOutgoingBitrate: config.webrtcTransport.initialAvailableOutgoingBitrate,
-    minimumAvailableOutgoingBitrate: config.webrtcTransport.minimumAvailableOutgoingBitrate,
-    enableSctp: config.webrtcTransport.enableSctp,
-    enableUdp: config.webrtcTransport.enableUdp,
-    enableTcp: config.webrtcTransport.enableTcp,
-    preferUdp: config.webrtcTransport.preferUdp,
-    appData: { socketId }
+  const worker = getNextWorker();
+  const transport = await worker.createWebRtcTransport({
+    listenIps: config.webRtcTransport.listenIps,
+    enableUdp: config.webRtcTransport.enableUdp,
+    enableTcp: config.webRtcTransport.enableTcp,
+    preferUdp: config.webRtcTransport.preferUdp,
+    initialAvailableOutgoingBitrate: config.webRtcTransport.initialAvailableOutgoingBitrate
   });
 
-  console.log(`✅ Создан WebRTC транспорт для клиента ${socketId}:`, {
-    id: transport.id,
-    iceParameters: transport.iceParameters,
-    iceCandidates: transport.iceCandidates,
-    dtlsParameters: transport.dtlsParameters
+  transport.on('dtlsstatechange', (dtlsState) => {
+    console.log(`🔐 DTLS state для транспорта ${socketId}: ${dtlsState}`);
   });
 
+  transport.on('sctpstatechange', (sctpState) => {
+    console.log(`📡 SCTP state для транспорта ${socketId}: ${sctpState}`);
+  });
+
+  console.log(`✅ WebRTC транспорт создан для ${socketId}`);
   return transport;
 }
 
 /**
- * Создание производителя (producer) - клиент отправляет медиа
+ * Создание producer (отправка медиа)
  */
 async function createProducer(transport, kind, rtpParameters) {
-  if (!lobbyRouter) {
-    throw new Error('Роутер лобби не создан');
-  }
-
-  const producer = await transport.produce({
-    kind,
-    rtpParameters
-  });
-
-  // Сохраняем producer в глобальное хранилище
+  const producer = await transport.produce({ kind, rtpParameters });
   producersMap.set(producer.id, producer);
-
-  console.log(`✅ Создан producer ${kind} для транспорта ${transport.id}:`, {
-    id: producer.id,
-    kind: producer.kind,
-    rtpParameters: producer.rtpParameters
+  
+  producer.on('transportclose', () => {
+    console.log(`⚠️ Producer ${producer.id} закрыт: transport закрыт`);
+    producersMap.delete(producer.id);
   });
-
+  
+  console.log(`✅ Producer создан: ${producer.id} (${kind})`);
   return producer;
 }
 
 /**
- * Создание потребителя (consumer) - клиент получает медиа
+ * Создание consumer (прием медиа)
  */
 async function createConsumer(transport, producerId, rtpCapabilities) {
-  if (!lobbyRouter) {
-    throw new Error('Роутер лобби не создан');
+  if (!producersMap.has(producerId)) {
+    throw new Error(`Producer ${producerId} не найден`);
   }
-
-  // Проверяем возможности клиента
-  if (!lobbyRouter.canConsume({ producerId, rtpCapabilities })) {
-    console.warn(`⚠️ Клиент не может потребить producer ${producerId}`);
-    throw new Error('Клиент не может потребить producer');
-  }
-
+  
+  const producer = producersMap.get(producerId);
   const consumer = await transport.consume({
-    producerId,
+    producerId: producer.id,
     rtpCapabilities
   });
-
-  console.log(`✅ Создан consumer для producer ${producerId}:`, {
-    id: consumer.id,
-    producerId: consumer.producerId,
-    kind: consumer.kind
+  
+  consumer.on('transportclose', () => {
+    console.log(`⚠️ Consumer ${consumer.id} закрыт: transport закрыт`);
   });
-
+  
+  console.log(`✅ Consumer создан: ${consumer.id}`);
   return consumer;
 }
 
 /**
- * Получить RTCP возможности роутера
+ * Получить RTP capabilities роутера
  */
 function getRouterRtpCapabilities() {
   if (!lobbyRouter) {
-    throw new Error('Роутер лобби не создан');
+    throw new Error('Роутер не инициализирован');
   }
   return lobbyRouter.rtpCapabilities;
 }
 
 /**
- * Получить всех активных производителей
+ * Получить всех active producers
  */
 function getAllProducers() {
   return Array.from(producersMap.values());
 }
 
 /**
- * Закрыть транспорт и все связанные ресурсы
+ * Закрыть транспорт
  */
 async function closeTransport(transport) {
   if (!transport) return;
-  
   try {
     transport.close();
     console.log(`✅ Транспорт ${transport.id} закрыт`);
@@ -205,10 +162,8 @@ async function closeTransport(transport) {
  */
 async function closeProducer(producer) {
   if (!producer) return;
-  
   try {
     producer.close();
-    // Удаляем из хранилища
     producersMap.delete(producer.id);
     console.log(`✅ Producer ${producer.id} закрыт`);
   } catch (error) {
@@ -221,7 +176,6 @@ async function closeProducer(producer) {
  */
 async function closeConsumer(consumer) {
   if (!consumer) return;
-  
   try {
     consumer.close();
     console.log(`✅ Consumer ${consumer.id} закрыт`);
@@ -229,27 +183,6 @@ async function closeConsumer(consumer) {
     console.error('❌ Ошибка закрытия consumer:', error);
   }
 }
-
-/**
- * Graceful shutdown
- */
-async function shutdown() {
-  console.log('🛑 Останавливаем Mediasoup...');
-  
-  // Закрываем все воркеры
-  for (const worker of workers) {
-    worker.close();
-  }
-  
-  workers = [];
-  lobbyRouter = null;
-  
-  console.log('✅ Mediasoup остановлен');
-}
-
-// Обработка сигналов для graceful shutdown
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
 
 module.exports = {
   initializeWorkers,
@@ -260,7 +193,6 @@ module.exports = {
   getAllProducers,
   closeTransport,
   closeProducer,
-  closeConsumer,
-  shutdown
+  closeConsumer
 };
 
