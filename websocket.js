@@ -893,6 +893,14 @@ wss.on("connection", (ws) => {
     usePublicStun: true
   };
   const iceServers = getIceServers(turnConfig);
+  
+  // Логируем для отладки
+  console.log("📡 ICE серверы для клиента:", JSON.stringify(iceServers, null, 2));
+  console.log("🔧 TURN конфигурация:", {
+    hasUrl: !!turnConfig.turnUrl,
+    hasUsername: !!turnConfig.turnUsername,
+    hasCredential: !!turnConfig.turnCredential
+  });
 
   // Приветственное сообщение с ICE серверами
   ws.send(JSON.stringify({
@@ -1701,10 +1709,14 @@ wss.on("connection", (ws) => {
         }
 
         default:
-          ws.send(JSON.stringify({ type: "error", message: "Неизвестная команда" }));
+          // Игнорируем неизвестные команды от mediasoup клиента (они не нужны для P2P режима)
+          console.log(`ℹ️ Игнорируем неизвестную команду: ${data.type}`);
+          // Не отправляем ошибку, чтобы не ломать клиент
+          break;
       }
     } catch (error) {
       console.error("❌ Ошибка обработки сообщения:", error);
+      console.error("❌ Данные сообщения:", message.toString());
       ws.send(JSON.stringify({ type: "error", message: "Ошибка сервера" }));
     }
   });
