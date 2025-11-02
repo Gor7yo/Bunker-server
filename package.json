@@ -5,7 +5,7 @@
   "main": "websocket.js",
   "scripts": {
     "start": "node websocket.js",
-    "postinstall": "echo 'Skipping mediasoup worker build (not needed for WebSocket server)'"
+    "postinstall": "cd node_modules/mediasoup && npm run build:worker || echo 'Mediasoup worker build skipped'"
   },
   "keywords": [],
   "author": "",

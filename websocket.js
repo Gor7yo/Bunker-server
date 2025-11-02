@@ -1,16 +1,6 @@
 // server.js
-// Загружаем переменные окружения из .env файла (для локальной разработки)
-// На Render.com переменные окружения уже доступны через process.env
-try {
-  require('dotenv').config();
-} catch (e) {
-  // dotenv не установлен или не требуется (production)
-  console.log('ℹ️ dotenv не используется (production или не установлен)');
-}
-
 const WebSocket = require("ws");
 const propertiesData = require("./properties.json");
-const { getIceServers } = require("./turn-server-config");
 
 const wss = new WebSocket.Server({ port: 5000 }, () =>
   console.log("✅ Сервер запущен на порту 5000")
@@ -885,29 +875,11 @@ wss.on("connection", (ws) => {
 
   console.log("🔌 Новое подключение:", ws.id);
 
-  // Получаем конфигурацию ICE серверов из переменных окружения или используем дефолтные
-  const turnConfig = {
-    turnUrl: process.env.TURN_URL || null,
-    turnUsername: process.env.TURN_USERNAME || null,
-    turnCredential: process.env.TURN_CREDENTIAL || null,
-    usePublicStun: true
-  };
-  const iceServers = getIceServers(turnConfig);
-  
-  // Логируем для отладки
-  console.log("📡 ICE серверы для клиента:", JSON.stringify(iceServers, null, 2));
-  console.log("🔧 TURN конфигурация:", {
-    hasUrl: !!turnConfig.turnUrl,
-    hasUsername: !!turnConfig.turnUsername,
-    hasCredential: !!turnConfig.turnCredential
-  });
-
-  // Приветственное сообщение с ICE серверами
+  // Приветственное сообщение
   ws.send(JSON.stringify({
     type: "welcome",
     yourId: ws.id,
-    message: "Подключение установлено",
-    iceServers: iceServers // Отправляем клиенту список ICE серверов
+    message: "Подключение установлено"
   }));
 
   // Отправляем текущее состояние
@@ -1709,14 +1681,10 @@ wss.on("connection", (ws) => {
         }
 
         default:
-          // Игнорируем неизвестные команды от mediasoup клиента (они не нужны для P2P режима)
-          console.log(`ℹ️ Игнорируем неизвестную команду: ${data.type}`);
-          // Не отправляем ошибку, чтобы не ломать клиент
-          break;
+          ws.send(JSON.stringify({ type: "error", message: "Неизвестная команда" }));
       }
     } catch (error) {
       console.error("❌ Ошибка обработки сообщения:", error);
-      console.error("❌ Данные сообщения:", message.toString());
       ws.send(JSON.stringify({ type: "error", message: "Ошибка сервера" }));
     }
   });
