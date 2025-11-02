@@ -2,9 +2,21 @@
 const WebSocket = require("ws");
 const propertiesData = require("./properties.json");
 
-const wss = new WebSocket.Server({ port: 5000 }, () =>
-  console.log("✅ Сервер запущен на порту 5000")
-);
+// Импортируем Mediasoup сервер
+const mediasoupServer = require('./mediasoup-server');
+
+const wss = new WebSocket.Server({ port: 5000 }, async () => {
+  console.log("✅ Сервер запущен на порту 5000");
+  
+  // Инициализируем Mediasoup
+  try {
+    await mediasoupServer.initializeWorkers();
+    console.log("✅ Mediasoup инициализирован");
+  } catch (error) {
+    console.error("❌ Ошибка инициализации Mediasoup:", error);
+    console.log("⚠️ Продолжаем без Mediasoup в режиме P2P");
+  }
+});
 
 const MAX_PLAYERS = 8; // Увеличил до 8
 let allPlayers = [];
@@ -795,6 +807,178 @@ function checkVotingComplete() {
     votingState.votes.clear();
     votingState.voteCounts = {};
     sendPlayersUpdate();
+  }
+}
+
+// ============================
+// 🎥 Обработка Mediasoup запросов
+// ============================
+async function handleMediasoupRequest(ws, data) {
+  const { requestType, requestId } = data;
+  
+  try {
+    // Получение RTP capabilities
+    if (requestType === 'getRouterRtpCapabilities') {
+      const rtpCapabilities = mediasoupServer.getRouterRtpCapabilities();
+      ws.send(JSON.stringify({
+        type: 'mediasoup',
+        requestId,
+        data: { rtpCapabilities }
+      }));
+      return;
+    }
+    
+    // Создание send transport
+    if (requestType === 'createSendTransport') {
+      const transport = await mediasoupServer.createWebRtcTransport(ws.id);
+      ws.transport = transport; // Сохраняем транспорт
+      
+      ws.send(JSON.stringify({
+        type: 'mediasoup',
+        requestId,
+        data: {
+          transportParams: {
+            id: transport.id,
+            iceParameters: transport.iceParameters,
+            iceCandidates: transport.iceCandidates,
+            dtlsParameters: transport.dtlsParameters
+          }
+        }
+      }));
+      return;
+    }
+    
+    // Создание recv transport
+    if (requestType === 'createRecvTransport') {
+      const transport = await mediasoupServer.createWebRtcTransport(ws.id);
+      ws.recvTransport = transport; // Сохраняем транспорт
+      
+      ws.send(JSON.stringify({
+        type: 'mediasoup',
+        requestId,
+        data: {
+          transportParams: {
+            id: transport.id,
+            iceParameters: transport.iceParameters,
+            iceCandidates: transport.iceCandidates,
+            dtlsParameters: transport.dtlsParameters
+          }
+        }
+      }));
+      return;
+    }
+    
+    // Подключение транспорта
+    if (requestType === 'connectSendTransport') {
+      if (!ws.transport) {
+        throw new Error('Transport не найден');
+      }
+      await ws.transport.connect({ dtlsParameters: data.data.dtlsParameters });
+      ws.send(JSON.stringify({ type: 'mediasoup', requestId, data: {} }));
+      return;
+    }
+    
+    if (requestType === 'connectRecvTransport') {
+      if (!ws.recvTransport) {
+        throw new Error('Recv transport не найден');
+      }
+      await ws.recvTransport.connect({ dtlsParameters: data.data.dtlsParameters });
+      ws.send(JSON.stringify({ type: 'mediasoup', requestId, data: {} }));
+      return;
+    }
+    
+    // Создание producer
+    if (requestType === 'produce') {
+      if (!ws.transport) {
+        throw new Error('Transport не найден');
+      }
+      const producer = await mediasoupServer.createProducer(
+        ws.transport,
+        data.data.kind,
+        data.data.rtpParameters
+      );
+      
+      ws.producers = ws.producers || new Map();
+      ws.producers.set(data.data.kind, producer);
+      
+      // Сообщаем всем о новом producer
+      const allConnections = [...allPlayers, host].filter(p => p !== ws);
+      allConnections.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({
+            type: 'new_producer',
+            producerId: producer.id,
+            producerKind: data.data.kind,
+            playerId: ws.id
+          }));
+        }
+      });
+      
+      ws.send(JSON.stringify({ 
+        type: 'mediasoup', 
+        requestId, 
+        data: { producerId: producer.id } 
+      }));
+      return;
+    }
+    
+    // Создание consumer
+    if (requestType === 'consume') {
+      if (!ws.recvTransport) {
+        throw new Error('Recv transport не найден');
+      }
+      const consumer = await mediasoupServer.createConsumer(
+        ws.recvTransport,
+        data.data.producerId,
+        data.data.rtpCapabilities
+      );
+      
+      ws.consumers = ws.consumers || new Map();
+      ws.consumers.set(data.data.producerId, consumer);
+      
+      ws.send(JSON.stringify({
+        type: 'mediasoup',
+        requestId,
+        data: {
+          consumerParams: {
+            id: consumer.id,
+            producerId: consumer.producerId,
+            kind: consumer.kind,
+            rtpParameters: consumer.rtpParameters
+          }
+        }
+      }));
+      return;
+    }
+    
+    // Возобновление consumer
+    if (requestType === 'consumerResumed') {
+      if (!ws.consumers) {
+        throw new Error('Consumers не найдены');
+      }
+      const consumerId = data.data.consumerId;
+      const consumer = Array.from(ws.consumers.values()).find(c => c.id === consumerId);
+      if (consumer) {
+        await consumer.resume();
+      }
+      ws.send(JSON.stringify({ type: 'mediasoup', requestId, data: {} }));
+      return;
+    }
+    
+    // Ошибка неизвестного запроса
+    ws.send(JSON.stringify({
+      type: 'mediasoup',
+      requestId,
+      error: 'Unknown request type'
+    }));
+    
+  } catch (error) {
+    console.error('❌ Ошибка обработки Mediasoup запроса:', error);
+    ws.send(JSON.stringify({
+      type: 'mediasoup',
+      requestId,
+      error: error.message
+    }));
   }
 }
 
@@ -1680,6 +1864,12 @@ wss.on("connection", (ws) => {
           break;
         }
 
+        // 🎥 Mediasoup медиа запросы
+        case "mediasoup": {
+          handleMediasoupRequest(ws, data);
+          break;
+        }
+
         default:
           ws.send(JSON.stringify({ type: "error", message: "Неизвестная команда" }));
       }
@@ -1690,8 +1880,31 @@ wss.on("connection", (ws) => {
   });
 
   // ❌ Отключение клиента
-  ws.on("close", () => {
+  ws.on("close", async () => {
     console.log(`❌ Отключился: ${ws.name || 'Unknown'} (${ws.role})`);
+    
+    // 🎥 Очищаем Mediasoup ресурсы
+    try {
+      if (ws.transport) {
+        await mediasoupServer.closeTransport(ws.transport);
+      }
+      if (ws.recvTransport) {
+        await mediasoupServer.closeTransport(ws.recvTransport);
+      }
+      if (ws.producers) {
+        for (const [kind, producer] of ws.producers) {
+          await mediasoupServer.closeProducer(producer);
+        }
+      }
+      if (ws.consumers) {
+        for (const [producerId, consumer] of ws.consumers) {
+          await mediasoupServer.closeConsumer(consumer);
+        }
+      }
+      console.log(`🧹 Mediasoup ресурсы для ${ws.id} очищены`);
+    } catch (error) {
+      console.error(`❌ Ошибка очистки Mediasoup ресурсов:`, error);
+    }
     
     // 💾 Сохраняем данные игрока перед отключением (если игра началась)
     // НЕ сохраняем для админ-панели
