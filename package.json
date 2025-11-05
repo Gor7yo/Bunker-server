@@ -4,8 +4,8 @@
   "description": "",
   "main": "websocket.js",
   "scripts": {
-    "start": "node websocket.js",
-    "postinstall": "cd node_modules/mediasoup && npm run build:worker || echo 'Mediasoup worker build skipped'"
+    "start": "node mediasoup-server.js",
+    "postinstall": "echo 'Mediasoup worker будет собран автоматически при первом запуске'"
   },
   "keywords": [],
   "author": "",
