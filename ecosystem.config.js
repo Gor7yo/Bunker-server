@@ -1,7 +1,7 @@
 module.exports = {
   apps: [{
     name: 'bunker-server',
-    script: './websocket.js',
+    script: './mediasoup-server.js',
     instances: 1,
     autorestart: true,
     watch: false,
