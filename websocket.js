@@ -2,9 +2,13 @@
 const WebSocket = require("ws");
 const propertiesData = require("./properties.json");
 
-const wss = new WebSocket.Server({ port: 5000 }, () =>
-  console.log("✅ Сервер запущен на порту 5000")
-);
+// ⚡ Оптимизации WebSocket Server
+const wss = new WebSocket.Server({ 
+  port: 5000,
+  perMessageDeflate: false, // Отключаем сжатие для снижения CPU (WebRTC сигналы маленькие)
+  maxPayload: 1024 * 1024, // 1MB максимум
+  clientTracking: true
+}, () => console.log("✅ Сервер запущен на порту 5000"));
 
 const MAX_PLAYERS = 8; // Увеличил до 8
 let allPlayers = [];
@@ -28,6 +32,22 @@ let votingState = {
   voteCounts: {} // Объект: targetPlayerId -> количество голосов
 };
 let votingHistory = []; // История голосований: [{timestamp, results: [{playerId, name, votes}]}]
+
+// ⚡ Кэширование для оптимизации
+let lastPlayersUpdateData = null;
+let lastPlayersUpdateString = null;
+let playersUpdateTimeout = null;
+const PLAYERS_UPDATE_THROTTLE = 100; // мс - максимальная частота обновлений
+
+// ⚡ Rate limiting для WebRTC сигналов
+const signalRateLimit = new Map(); // playerId -> {count, resetAt}
+const SIGNAL_RATE_LIMIT = 50; // максимальное количество сигналов
+const SIGNAL_RATE_WINDOW = 1000; // за 1 секунду
+
+// ⚡ Условное логирование (можно отключить для production)
+const DEBUG = process.env.NODE_ENV !== 'production';
+const log = DEBUG ? console.log : () => {};
+const logError = console.error;
 
 // ============================
 // 🎲 Генерация случайных характеристик игрока (без повторений)
@@ -554,27 +574,42 @@ function handleExperimentalTreatment(playerIds, allConnections) {
 }
 
 // ============================
-// 📡 Функция отправки всем клиентам
+// 📡 Функция отправки всем клиентам (оптимизированная)
 // ============================
 function broadcast(data, excludeWs = null) {
+  // Кэшируем сериализованное сообщение
   const msg = JSON.stringify(data);
   const clients = [...allPlayers, host].filter(p => p && p.readyState === WebSocket.OPEN);
   
-  clients.forEach((client) => {
+  // Используем более быстрый цикл for вместо forEach
+  for (let i = 0; i < clients.length; i++) {
+    const client = clients[i];
     if (client !== excludeWs && client.readyState === WebSocket.OPEN) {
       try {
         client.send(msg);
       } catch (error) {
-        console.error("❌ Ошибка отправки:", error);
+        logError("❌ Ошибка отправки:", error);
       }
     }
-  });
+  }
 }
 
 // ============================
-// 🔁 Отправка актуального списка игроков всем
+// 🔁 Отправка актуального списка игроков всем (оптимизированная с троттлингом)
 // ============================
-function sendPlayersUpdate() {
+function sendPlayersUpdate(force = false) {
+  // Троттлинг: не отправляем обновления слишком часто
+  if (!force && playersUpdateTimeout) {
+    return; // Уже запланировано обновление
+  }
+  
+  playersUpdateTimeout = setTimeout(() => {
+    playersUpdateTimeout = null;
+    _sendPlayersUpdateNow();
+  }, force ? 0 : PLAYERS_UPDATE_THROTTLE);
+}
+
+function _sendPlayersUpdateNow() {
   const activePlayers = allPlayers.filter(p => p.readyState === WebSocket.OPEN);
   const activeHost = host && host.readyState === WebSocket.OPEN ? host : null;
 
@@ -586,52 +621,19 @@ function sendPlayersUpdate() {
   const readyCount = playersList.filter((p) => p.ready).length;
   const totalPlayers = playersList.length;
 
-  console.log("📤 Игроков онлайн:", activePlayers.length, "Готовых:", readyCount);
+  log("📤 Игроков онлайн:", activePlayers.length, "Готовых:", readyCount);
 
-  // Отправляем обновление всем: игрокам, ведущему и админ-панели (если подключена)
-  const allConnections = [...playersList];
-  if (adminPanel && adminPanel.readyState === WebSocket.OPEN) {
-    adminPanel.send(JSON.stringify({
-      type: "players_update",
-      players: playersList.map((p) => ({
-        id: p.id,
-        name: p.name,
-        ready: p.ready,
-        role: p.role,
-        characteristics: p.characteristics || null,
-        mirrorCamera: p.mirrorCamera || false
-      })),
-      readyCount,
-      totalPlayers,
-      regularPlayers: activePlayers.length,
-      maxRegularPlayers: MAX_PLAYERS,
-      hostConnected: !!activeHost,
-      hostReady: activeHost ? activeHost.ready : false,
-      gameStarted: gameState.started,
-      gameStartTime: gameState.startTime,
-      gameElapsedTime: gameState.started && gameState.startTime ? Date.now() - gameState.startTime : 0,
-      gameReady: gameState.ready,
-      currentRound: gameState.currentRound,
-      totalRounds: gameState.totalRounds,
-      highlightedPlayerId: highlightedPlayerId,
-      votingActive: votingState.phase === "voting",
-      votingPhase: votingState.phase, // "selection" | "voting" | null
-      votingCandidates: Array.from(votingState.candidates), // Массив ID кандидатов
-      votedPlayers: Array.from(votingState.votes.keys()), // Список ID проголосовавших игроков
-      voteCounts: votingState.voteCounts // Результаты голосования
-    }));
-  }
-
-  broadcast({
+  // Создаем объект один раз
+  const updateData = {
     type: "players_update",
     players: playersList.map((p) => ({
-        id: p.id,
-        name: p.name,
-        ready: p.ready,
-        role: p.role,
-        characteristics: p.characteristics || null,
-        mirrorCamera: p.mirrorCamera || false
-      })),
+      id: p.id,
+      name: p.name,
+      ready: p.ready,
+      role: p.role,
+      characteristics: p.characteristics || null,
+      mirrorCamera: p.mirrorCamera || false
+    })),
     readyCount,
     totalPlayers,
     regularPlayers: activePlayers.length,
@@ -641,16 +643,53 @@ function sendPlayersUpdate() {
     gameStarted: gameState.started,
     gameStartTime: gameState.startTime,
     gameElapsedTime: gameState.started && gameState.startTime ? Date.now() - gameState.startTime : 0,
-      gameReady: gameState.ready,
-      currentRound: gameState.currentRound,
-      totalRounds: gameState.totalRounds,
-      highlightedPlayerId: highlightedPlayerId,
-      votingActive: votingState.phase === "voting",
-      votingPhase: votingState.phase, // "selection" | "voting" | null
-      votingCandidates: Array.from(votingState.candidates), // Массив ID кандидатов
-      votedPlayers: Array.from(votingState.votes.keys()), // Список ID проголосовавших игроков
-      voteCounts: votingState.voteCounts // Результаты голосования
-  });
+    gameReady: gameState.ready,
+    currentRound: gameState.currentRound,
+    totalRounds: gameState.totalRounds,
+    highlightedPlayerId: highlightedPlayerId,
+    votingActive: votingState.phase === "voting",
+    votingPhase: votingState.phase,
+    votingCandidates: Array.from(votingState.candidates),
+    votedPlayers: Array.from(votingState.votes.keys()),
+    voteCounts: votingState.voteCounts
+  };
+
+  // Проверяем, изменились ли данные (простая проверка)
+  const dataKey = `${playersList.length}-${readyCount}-${gameState.started}-${gameState.currentRound}`;
+  if (lastPlayersUpdateData === dataKey && lastPlayersUpdateString) {
+    // Используем кэшированную строку, если данные не изменились
+    const msg = lastPlayersUpdateString;
+    
+    // Отправляем админ-панели
+    if (adminPanel && adminPanel.readyState === WebSocket.OPEN) {
+      try {
+        adminPanel.send(msg);
+      } catch (e) {
+        logError("❌ Ошибка отправки админ-панели:", e);
+      }
+    }
+    
+    // Отправляем всем игрокам
+    broadcast(updateData); // Используем существующую функцию broadcast
+    return;
+  }
+
+  // Данные изменились - кэшируем новые
+  lastPlayersUpdateData = dataKey;
+  const msg = JSON.stringify(updateData);
+  lastPlayersUpdateString = msg;
+
+  // Отправляем админ-панели
+  if (adminPanel && adminPanel.readyState === WebSocket.OPEN) {
+    try {
+      adminPanel.send(msg);
+    } catch (e) {
+      logError("❌ Ошибка отправки админ-панели:", e);
+    }
+  }
+
+  // Отправляем всем игрокам
+  broadcast(updateData);
 }
 
 // ============================
@@ -873,7 +912,7 @@ wss.on("connection", (ws) => {
   ws.role = "player";
   ws.ready = false;
 
-  console.log("🔌 Новое подключение:", ws.id);
+  log("🔌 Новое подключение:", ws.id);
 
   // Приветственное сообщение
   ws.send(JSON.stringify({
@@ -882,8 +921,8 @@ wss.on("connection", (ws) => {
     message: "Подключение установлено"
   }));
 
-  // Отправляем текущее состояние
-  sendPlayersUpdate();
+  // Отправляем текущее состояние (force = true для немедленной отправки при подключении)
+  sendPlayersUpdate(true);
 
   ws.on("message", (message) => {
     try {
@@ -1134,11 +1173,24 @@ wss.on("connection", (ws) => {
         }
 
 
-        // 📡 WebRTC сигналы - УЛУЧШЕННАЯ ВЕРСИЯ
+        // 📡 WebRTC сигналы - УЛУЧШЕННАЯ ВЕРСИЯ с rate limiting
         case "signal": {
           if (!data.targetId || !data.signal) {
             ws.send(JSON.stringify({ type: "error", message: "Неверный сигнал" }));
             return;
+          }
+
+          // ⚡ Rate limiting: проверяем, не превышен ли лимит
+          const now = Date.now();
+          const limit = signalRateLimit.get(ws.id);
+          
+          if (!limit || now > limit.resetAt) {
+            signalRateLimit.set(ws.id, { count: 1, resetAt: now + SIGNAL_RATE_WINDOW });
+          } else if (limit.count >= SIGNAL_RATE_LIMIT) {
+            // Превышен лимит - игнорируем сигнал (защита от спама)
+            return;
+          } else {
+            limit.count++;
           }
 
           // Находим целевого игрока
@@ -1147,7 +1199,7 @@ wss.on("connection", (ws) => {
           );
           
           if (!targetPlayer) {
-            console.log(`❌ Целевой игрок ${data.targetId} не найден`);
+            log(`❌ Целевой игрок ${data.targetId} не найден`);
             ws.send(JSON.stringify({ type: "error", message: "Игрок не в сети" }));
             return;
           }
@@ -1161,9 +1213,9 @@ wss.on("connection", (ws) => {
             timestamp: Date.now()
           });
 
-          if (success) {
+          if (success && DEBUG) {
             const signalType = data.signal.type || 'ice-candidate';
-            console.log(`📡 ${signalType} от ${ws.name} к ${targetPlayer.name}`);
+            log(`📡 ${signalType} от ${ws.name} к ${targetPlayer.name}`);
           }
           break;
         }
@@ -1691,7 +1743,10 @@ wss.on("connection", (ws) => {
 
   // ❌ Отключение клиента
   ws.on("close", () => {
-    console.log(`❌ Отключился: ${ws.name || 'Unknown'} (${ws.role})`);
+    log(`❌ Отключился: ${ws.name || 'Unknown'} (${ws.role})`);
+    
+    // Очищаем rate limit при отключении
+    signalRateLimit.delete(ws.id);
     
     // 💾 Сохраняем данные игрока перед отключением (если игра началась)
     // НЕ сохраняем для админ-панели
@@ -1733,7 +1788,7 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("error", (error) => {
-    console.error(`💥 Ошибка: ${ws.name || ws.id}`, error);
+    logError(`💥 Ошибка: ${ws.name || ws.id}`, error);
   });
 });
 
