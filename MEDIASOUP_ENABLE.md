@@ -28,13 +28,13 @@ cd /opt/bunker-server/server
 # Проверь наличие worker
 ls -la node_modules/.pnpm/mediasoup@*/node_modules/mediasoup/worker/out/Release/mediasoup-worker
 
-# Если worker не найден - собери его
-cd node_modules/.pnpm/mediasoup@*/node_modules/mediasoup
-npm run build:worker
-
-# Или используй скрипт
+# Если worker не найден - собери его через скрипт
 cd /opt/bunker-server/server
-node build-mediasoup.js
+npm run build:mediasoup
+
+# Или вручную:
+cd node_modules/.pnpm/mediasoup@*/node_modules/mediasoup/worker
+npm install
 ```
 
 ### 3. Перезапусти сервер

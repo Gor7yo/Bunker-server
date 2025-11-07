@@ -1,11 +1,9 @@
-// Скрипт для проверки mediasoup worker на Render.com
-// Mediasoup автоматически скачивает prebuilt worker при установке,
-// поэтому ручная сборка не нужна
-
+// Скрипт для сборки mediasoup worker
+const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-console.log('🔍 Проверяем наличие mediasoup worker...');
+console.log('🔨 Начинаем сборку mediasoup worker...');
 
 // Пробуем найти mediasoup в разных местах (для pnpm и npm)
 const possiblePaths = [
@@ -27,18 +25,45 @@ for (const testPath of possiblePaths) {
 }
 
 if (!mediasoupPath) {
-  console.log('⚠️ Mediasoup не найден');
-  process.exit(0);
+  console.error('❌ Mediasoup не найден в node_modules. Проверьте установку.');
+  process.exit(1);
 }
 
 // Проверяем наличие worker
-const workerPath = path.join(mediasoupPath, 'worker', 'out', 'Release', 'mediasoup-worker');
-if (fs.existsSync(workerPath)) {
-  console.log('✅ Mediasoup worker найден (prebuilt)');
+const workerDir = path.join(mediasoupPath, 'worker');
+const workerOutPath = path.join(workerDir, 'out', 'Release', 'mediasoup-worker');
+
+if (fs.existsSync(workerOutPath)) {
+  console.log('✅ Mediasoup worker уже собран.');
   process.exit(0);
-} else {
-  console.log('⚠️ Mediasoup worker не найден, но он будет скачан автоматически при первом запуске');
-  console.log('ℹ️ Mediasoup использует prebuilt worker, ручная сборка не требуется');
-  process.exit(0);
+}
+
+// Собираем worker
+if (!fs.existsSync(workerDir)) {
+  console.error('❌ Директория worker не найдена:', workerDir);
+  process.exit(1);
+}
+
+try {
+  console.log(`⚙️ Запускаем npm install в директории worker: ${workerDir}...`);
+  execSync('npm install', { cwd: workerDir, stdio: 'inherit' });
+  
+  // Проверяем что worker собран
+  if (fs.existsSync(workerOutPath)) {
+    console.log('✅ Mediasoup worker успешно собран!');
+    process.exit(0);
+  } else {
+    console.warn('⚠️ npm install завершился, но worker не найден. Возможно нужна дополнительная сборка.');
+    console.log('💡 Попробуйте запустить вручную:');
+    console.log(`   cd ${workerDir}`);
+    console.log('   npm install');
+    process.exit(1);
+  }
+} catch (error) {
+  console.error('❌ Ошибка при сборке mediasoup worker:', error.message);
+  console.log('💡 Попробуйте собрать вручную:');
+  console.log(`   cd ${workerDir}`);
+  console.log('   npm install');
+  process.exit(1);
 }
 
