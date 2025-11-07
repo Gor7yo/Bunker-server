@@ -89,7 +89,7 @@ function generatePlayerCharacteristics() {
         const randomIndex = Math.floor(Math.random() * availableItems.length);
         const selectedItem = availableItems[randomIndex];
         
-        // Помечаем карту как использованную
+        // Помечаем карту как использованну
         usedCards[category].add(selectedItem.value);
         
         characteristics[category] = {
