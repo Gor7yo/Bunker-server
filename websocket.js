@@ -146,12 +146,11 @@ async function createWebRtcTransport(playerId, direction = 'send') {
     throw new Error('Router не инициализирован');
   }
 
-  // Для Render.com используем домен вместо IP
-  // Render.com не предоставляет статический IP, поэтому используем домен
-  const listenIps = [{
-    ip: '0.0.0.0',
-    announcedAddress: process.env.MEDIASOUP_ANNOUNCED_ADDRESS || 'bunker-server-ujdj.onrender.com',
-  }];
+        // Используем домен для mediasoup
+        const listenIps = [{
+          ip: '0.0.0.0',
+          announcedAddress: process.env.MEDIASOUP_ANNOUNCED_ADDRESS || 'api.bunker-server.ru',
+        }];
 
   const transport = await mediasoupRouter.createWebRtcTransport({
     listenIps,
