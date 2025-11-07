@@ -1,5 +1,6 @@
 // server.js
 const WebSocket = require("ws");
+const mediasoup = require("mediasoup");
 const propertiesData = require("./properties.json");
 
 // ⚡ Оптимизации WebSocket Server
@@ -49,6 +50,277 @@ const SIGNAL_RATE_WINDOW = 1000; // за 1 секунду
 const DEBUG = process.env.NODE_ENV !== 'production';
 const log = DEBUG ? console.log : () => {};
 const logError = console.error;
+
+// ============================
+// 🎥 Mediasoup инициализация
+// ============================
+let mediasoupWorker = null;
+let mediasoupRouter = null;
+const mediasoupProducers = new Map(); // playerId -> { audio: Producer, video: Producer }
+const mediasoupTransports = new Map(); // playerId -> { send: Transport, recv: Transport }
+const mediasoupConsumers = new Map(); // playerId -> Map<producerId, Consumer>
+
+// Инициализация mediasoup
+async function initMediasoup() {
+  try {
+    // Создаем worker
+    mediasoupWorker = await mediasoup.createWorker({
+      logLevel: 'warn',
+      logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp'],
+      rtcMinPort: 40000,
+      rtcMaxPort: 49999,
+    });
+
+    mediasoupWorker.on('died', () => {
+      console.error('❌ Mediasoup worker died, exiting...');
+      process.exit(1);
+    });
+
+    // Создаем router с кодеками
+    mediasoupRouter = await mediasoupWorker.createRouter({
+      mediaCodecs: [
+        {
+          kind: 'audio',
+          mimeType: 'audio/opus',
+          clockRate: 48000,
+          channels: 2,
+        },
+        {
+          kind: 'video',
+          mimeType: 'video/VP8',
+          clockRate: 90000,
+          rtcpFeedback: [
+            { type: 'nack' },
+            { type: 'ccm', parameter: 'fir' },
+            { type: 'goog-remb' },
+          ],
+        },
+        {
+          kind: 'video',
+          mimeType: 'video/VP9',
+          clockRate: 90000,
+          rtcpFeedback: [
+            { type: 'nack' },
+            { type: 'ccm', parameter: 'fir' },
+            { type: 'goog-remb' },
+          ],
+        },
+        {
+          kind: 'video',
+          mimeType: 'video/H264',
+          clockRate: 90000,
+          parameters: {
+            'packetization-mode': 1,
+            'profile-level-id': '42e01f',
+            'level-asymmetry-allowed': 1,
+          },
+          rtcpFeedback: [
+            { type: 'nack' },
+            { type: 'nack', parameter: 'pli' },
+            { type: 'ccm', parameter: 'fir' },
+            { type: 'goog-remb' },
+          ],
+        },
+      ],
+    });
+
+    console.log('✅ Mediasoup инициализирован');
+    console.log(`📡 Router RTP capabilities:`, mediasoupRouter.rtpCapabilities);
+  } catch (error) {
+    console.error('❌ Ошибка инициализации mediasoup:', error);
+    throw error;
+  }
+}
+
+// Получить RTP capabilities роутера
+function getRouterRtpCapabilities() {
+  return mediasoupRouter ? mediasoupRouter.rtpCapabilities : null;
+}
+
+// Создать WebRTC транспорт для отправки
+async function createWebRtcTransport(playerId, direction = 'send') {
+  if (!mediasoupRouter) {
+    throw new Error('Router не инициализирован');
+  }
+
+  const transport = await mediasoupRouter.createWebRtcTransport({
+    listenIps: [
+      {
+        ip: '0.0.0.0',
+        announcedIp: process.env.MEDIASOUP_ANNOUNCED_IP || null, // Для Selectel укажите внешний IP
+      },
+    ],
+    enableUdp: true,
+    enableTcp: true,
+    preferUdp: true,
+    initialAvailableOutgoingBitrate: 1000000,
+  });
+
+  // Сохраняем транспорт
+  if (!mediasoupTransports.has(playerId)) {
+    mediasoupTransports.set(playerId, {});
+  }
+  mediasoupTransports.get(playerId)[direction] = transport;
+
+  transport.on('dtlsstatechange', (dtlsState) => {
+    if (dtlsState === 'closed') {
+      transport.close();
+    }
+  });
+
+  transport.on('close', () => {
+    console.log(`🔌 Transport закрыт для ${playerId}`);
+  });
+
+  return {
+    id: transport.id,
+    iceParameters: transport.iceParameters,
+    iceCandidates: transport.iceCandidates,
+    dtlsParameters: transport.dtlsParameters,
+    sctpParameters: transport.sctpParameters,
+  };
+}
+
+// Подключить транспорт
+async function connectTransport(playerId, transportId, dtlsParameters, direction = 'send') {
+  const playerTransports = mediasoupTransports.get(playerId);
+  if (!playerTransports || !playerTransports[direction]) {
+    throw new Error(`Transport не найден для ${playerId}`);
+  }
+
+  const transport = playerTransports[direction];
+  await transport.connect({ dtlsParameters });
+  console.log(`✅ Transport подключен: ${playerId} (${direction})`);
+}
+
+// Создать producer (отправка медиа)
+async function createProducer(playerId, transportId, kind, rtpParameters) {
+  const playerTransports = mediasoupTransports.get(playerId);
+  if (!playerTransports || !playerTransports.send) {
+    throw new Error(`Send transport не найден для ${playerId}`);
+  }
+
+  const transport = playerTransports.send;
+  const producer = await transport.produce({ kind, rtpParameters });
+
+  // Сохраняем producer
+  if (!mediasoupProducers.has(playerId)) {
+    mediasoupProducers.set(playerId, {});
+  }
+  mediasoupProducers.get(playerId)[kind] = producer;
+
+  producer.on('transportclose', () => {
+    console.log(`📹 Producer transport закрыт: ${playerId} (${kind})`);
+    mediasoupProducers.delete(playerId);
+  });
+
+  console.log(`📹 Producer создан: ${playerId} (${kind})`);
+  
+  // Уведомляем всех остальных игроков о новом producer
+  broadcastNewProducer(playerId, producer.id, kind);
+
+  return {
+    id: producer.id,
+    kind: producer.kind,
+    rtpParameters: producer.rtpParameters,
+  };
+}
+
+// Создать consumer (прием медиа)
+async function createConsumer(playerId, producerId, rtpCapabilities) {
+  if (!mediasoupRouter.canConsume({ producerId, rtpCapabilities })) {
+    throw new Error('Нельзя создать consumer для этого producer');
+  }
+
+  const playerTransports = mediasoupTransports.get(playerId);
+  if (!playerTransports || !playerTransports.recv) {
+    throw new Error(`Recv transport не найден для ${playerId}`);
+  }
+
+  const transport = playerTransports.recv;
+  const consumer = await transport.consume({
+    producerId,
+    rtpCapabilities,
+    paused: false,
+  });
+
+  // Сохраняем consumer
+  if (!mediasoupConsumers.has(playerId)) {
+    mediasoupConsumers.set(playerId, new Map());
+  }
+  mediasoupConsumers.get(playerId).set(producerId, consumer);
+
+  consumer.on('transportclose', () => {
+    console.log(`📺 Consumer transport закрыт: ${playerId} (${producerId})`);
+    mediasoupConsumers.get(playerId)?.delete(producerId);
+  });
+
+  console.log(`📺 Consumer создан: ${playerId} -> ${producerId}`);
+
+  return {
+    id: consumer.id,
+    producerId: consumer.producerId,
+    kind: consumer.kind,
+    rtpParameters: consumer.rtpParameters,
+  };
+}
+
+// Уведомить всех о новом producer
+function broadcastNewProducer(playerId, producerId, kind) {
+  const allConnections = [...allPlayers, host].filter(p => p && p.readyState === WebSocket.OPEN && p.id !== playerId);
+  
+  allConnections.forEach(connection => {
+    try {
+      connection.send(JSON.stringify({
+        type: 'new_producer',
+        playerId,
+        producerId,
+        kind,
+      }));
+    } catch (error) {
+      logError('❌ Ошибка отправки new_producer:', error);
+    }
+  });
+}
+
+// Очистка медиа-ресурсов игрока
+function cleanupPlayerMedia(playerId) {
+  // Закрываем producers
+  const producers = mediasoupProducers.get(playerId);
+  if (producers) {
+    Object.values(producers).forEach(producer => {
+      if (producer && !producer.closed) {
+        producer.close();
+      }
+    });
+    mediasoupProducers.delete(playerId);
+  }
+
+  // Закрываем consumers
+  const consumers = mediasoupConsumers.get(playerId);
+  if (consumers) {
+    consumers.forEach(consumer => {
+      if (consumer && !consumer.closed) {
+        consumer.close();
+      }
+    });
+    mediasoupConsumers.delete(playerId);
+  }
+
+  // Закрываем transports
+  const transports = mediasoupTransports.get(playerId);
+  if (transports) {
+    if (transports.send && !transports.send.closed) {
+      transports.send.close();
+    }
+    if (transports.recv && !transports.recv.closed) {
+      transports.recv.close();
+    }
+    mediasoupTransports.delete(playerId);
+  }
+
+  console.log(`🧹 Медиа-ресурсы очищены для ${playerId}`);
+}
 
 // ============================
 // 🎲 Генерация случайных характеристик игрока (без повторений)
@@ -929,7 +1201,7 @@ wss.on("connection", (ws) => {
   // Отправляем текущее состояние (force = true для немедленной отправки при подключении)
   sendPlayersUpdate(true);
 
-  ws.on("message", (message) => {
+  ws.on("message", async (message) => {
     try {
       const data = JSON.parse(message);
 
@@ -1232,6 +1504,134 @@ wss.on("connection", (ws) => {
             type: "refresh_connections_request",
             from: ws.id
           }, ws);
+          break;
+        }
+
+        // 🎥 Mediasoup обработчики
+        case "get_router_rtp_capabilities": {
+          try {
+            const rtpCapabilities = getRouterRtpCapabilities();
+            if (rtpCapabilities) {
+              ws.send(JSON.stringify({
+                type: "router_rtp_capabilities",
+                rtpCapabilities
+              }));
+            } else {
+              ws.send(JSON.stringify({
+                type: "error",
+                message: "Router не инициализирован"
+              }));
+            }
+          } catch (error) {
+            logError("❌ Ошибка get_router_rtp_capabilities:", error);
+            ws.send(JSON.stringify({
+              type: "error",
+              message: "Ошибка получения RTP capabilities"
+            }));
+          }
+          break;
+        }
+
+        case "create_transport": {
+          try {
+            const { direction } = data; // 'send' или 'recv'
+            const transportData = await createWebRtcTransport(ws.id, direction);
+            ws.send(JSON.stringify({
+              type: "transport_created",
+              direction,
+              transportData
+            }));
+          } catch (error) {
+            logError("❌ Ошибка create_transport:", error);
+            ws.send(JSON.stringify({
+              type: "error",
+              message: "Ошибка создания транспорта"
+            }));
+          }
+          break;
+        }
+
+        case "connect_transport": {
+          try {
+            const { transportId, dtlsParameters, direction } = data;
+            await connectTransport(ws.id, transportId, dtlsParameters, direction);
+            ws.send(JSON.stringify({
+              type: "transport_connected",
+              transportId,
+              direction
+            }));
+          } catch (error) {
+            logError("❌ Ошибка connect_transport:", error);
+            ws.send(JSON.stringify({
+              type: "error",
+              message: "Ошибка подключения транспорта"
+            }));
+          }
+          break;
+        }
+
+        case "produce": {
+          try {
+            const { transportId, kind, rtpParameters } = data;
+            const producerData = await createProducer(ws.id, transportId, kind, rtpParameters);
+            ws.send(JSON.stringify({
+              type: "produced",
+              producerData
+            }));
+          } catch (error) {
+            logError("❌ Ошибка produce:", error);
+            ws.send(JSON.stringify({
+              type: "error",
+              message: "Ошибка создания producer"
+            }));
+          }
+          break;
+        }
+
+        case "consume": {
+          try {
+            const { producerId, rtpCapabilities } = data;
+            const consumerData = await createConsumer(ws.id, producerId, rtpCapabilities);
+            ws.send(JSON.stringify({
+              type: "consumed",
+              consumerData
+            }));
+          } catch (error) {
+            logError("❌ Ошибка consume:", error);
+            ws.send(JSON.stringify({
+              type: "error",
+              message: "Ошибка создания consumer"
+            }));
+          }
+          break;
+        }
+
+        case "resume_consumer": {
+          try {
+            const { consumerId } = data;
+            const consumers = mediasoupConsumers.get(ws.id);
+            if (consumers) {
+              const consumer = Array.from(consumers.values()).find(c => c.id === consumerId);
+              if (consumer) {
+                await consumer.resume();
+                ws.send(JSON.stringify({
+                  type: "consumer_resumed",
+                  consumerId
+                }));
+              } else {
+                ws.send(JSON.stringify({
+                  type: "error",
+                  message: "Consumer не найден"
+                }));
+              }
+            }
+          } catch (error) {
+            logError("❌ Ошибка resume_consumer:", error);
+            ws.send(JSON.stringify({
+              type: "error",
+              message: "Ошибка возобновления consumer"
+            }));
+          }
           break;
         }
 
@@ -1750,6 +2150,9 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     log(`❌ Отключился: ${ws.name || 'Unknown'} (${ws.role})`);
     
+    // Очищаем медиа-ресурсы mediasoup
+    cleanupPlayerMedia(ws.id);
+    
     // Очищаем rate limit при отключении
     signalRateLimit.delete(ws.id);
     
@@ -1797,4 +2200,10 @@ wss.on("connection", (ws) => {
   });
 });
 
-console.log("🚀 Сервер 'Бункер' готов для 8 игроков!");
+// Инициализируем mediasoup при старте
+initMediasoup().then(() => {
+  console.log("🚀 Сервер 'Бункер' готов для 8 игроков!");
+}).catch((error) => {
+  console.error("❌ Критическая ошибка инициализации mediasoup:", error);
+  process.exit(1);
+});
