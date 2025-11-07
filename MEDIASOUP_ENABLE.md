@@ -99,9 +99,13 @@ ufw status
 # Проверь что worker собран
 ls -la node_modules/.pnpm/mediasoup@*/node_modules/mediasoup/worker/out/Release/mediasoup-worker
 
-# Если нет - собери
-cd node_modules/.pnpm/mediasoup@*/node_modules/mediasoup
-npm run build:worker
+# Если нет - собери через скрипт
+cd /opt/bunker-server/server
+npm run build:mediasoup
+
+# Или вручную:
+cd node_modules/.pnpm/mediasoup@*/node_modules/mediasoup/worker
+npm install
 ```
 
 ### Ошибка: "spawn mediasoup-worker ENOENT"
