@@ -89,7 +89,7 @@ function generatePlayerCharacteristics() {
         const randomIndex = Math.floor(Math.random() * availableItems.length);
         const selectedItem = availableItems[randomIndex];
         
-        // Помечаем карту как использованну
+        // Помечаем карту как использованную
         usedCards[category].add(selectedItem.value);
         
         characteristics[category] = {
@@ -193,7 +193,7 @@ function handleActionCard(actionType, parameters, allConnections) {
       handlePhobiaGone(parameters.selectedPlayers, allConnections);
       break;
     
-    case "Сбросс здоровья":
+    case "Сброс здоровья":
       handleHealthReset(allConnections);
       break;
     
@@ -610,7 +610,7 @@ function sendPlayersUpdate(force = false) {
 }
 
 function _sendPlayersUpdateNow() {
-  const activePlayers = allPlayers.filter(p => p.readyState === WebSocket.OPEN);
+  const activePlayers = allPlayers.filter(p => p && p.readyState === WebSocket.OPEN);
   const activeHost = host && host.readyState === WebSocket.OPEN ? host : null;
 
   const playersList = [...activePlayers];
@@ -699,6 +699,7 @@ function checkVotingComplete() {
   if (votingState.phase !== "voting") return;
   
   const activePlayers = allPlayers.filter(p => 
+    p && 
     p.readyState === WebSocket.OPEN && 
     p.role !== "host" &&
     p.ready &&
@@ -721,12 +722,15 @@ function checkVotingComplete() {
     
     if (maxVotes === 0) {
       // Никто не получил голосов
+      // Сохраняем список кандидатов до очистки
+      const candidatesList = Array.from(votingState.candidates);
+      
       votingState.phase = null;
       votingState.candidates.clear();
       
       // Собираем полные результаты голосования (только кандидаты)
       const allConnections = [...allPlayers, host];
-      const allVotingResults = Array.from(votingState.candidates)
+      const allVotingResults = candidatesList
         .map(candidateId => {
           const player = allConnections.find(p => p && p.id === candidateId);
           return player ? {
@@ -841,7 +845,7 @@ function checkVotingComplete() {
 // ✅ Проверяем: все ли готовы, и можно ли стартовать
 // ============================
 function checkAllReady() {
-  const activePlayers = allPlayers.filter(p => p.readyState === WebSocket.OPEN);
+  const activePlayers = allPlayers.filter(p => p && p.readyState === WebSocket.OPEN);
   const activeHost = host && host.readyState === WebSocket.OPEN ? host : null;
 
   if (!activeHost || !activeHost.ready) {
@@ -1067,7 +1071,7 @@ wss.on("connection", (ws) => {
             // 👤 Обычный игрок
             // Если игрок не в списке активных, добавляем
             if (!allPlayers.includes(ws)) {
-              const activeRegularPlayers = allPlayers.filter(p => p.readyState === WebSocket.OPEN);
+              const activeRegularPlayers = allPlayers.filter(p => p && p.readyState === WebSocket.OPEN);
               
               if (activeRegularPlayers.length >= MAX_PLAYERS && !isReconnecting) {
                 ws.send(JSON.stringify({ 
@@ -1476,7 +1480,7 @@ wss.on("connection", (ws) => {
               return;
             }
             
-            const activePlayers = allPlayers.filter(p => p.readyState === WebSocket.OPEN && p.role !== "host" && !bannedPlayers.has(p.id));
+            const activePlayers = allPlayers.filter(p => p && p.readyState === WebSocket.OPEN && p.role !== "host" && !bannedPlayers.has(p.id));
             if (activePlayers.length < 2) {
               ws.send(JSON.stringify({ type: "error", message: "Для голосования нужно минимум 2 игрока" }));
               return;
