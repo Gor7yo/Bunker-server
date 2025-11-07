@@ -14,8 +14,9 @@ Mediasoup работает на том же сервере, где и WebSocket 
 ```env
 PORT=5000
 NODE_ENV=production
-# MEDIASOUP_ANNOUNCED_IP - обычно НЕ нужен, Render определяет IP автоматически
-# Но если есть проблемы с подключением, можно указать вручную
+# MEDIASOUP_ANNOUNCED_ADDRESS - домен вашего сервиса на Render.com
+# По умолчанию: bunker-server-ujdj.onrender.com
+# Если используете другой домен, укажите его здесь
 ```
 
 ### Порты на Render.com:
