@@ -6,7 +6,7 @@
 ## Быстрое решение (1 команда)
 
 ```bash
-cd /opt/bunker-server && pm2 restart bunker-server && pm2 logs bunker-server --lines 30
+cd /opt/bunker-server && pm2 restart bunker-server && pm2 logsunker-server --lines 30
 ```
 
 Код теперь автоматически ищет worker и устанавливает путь.

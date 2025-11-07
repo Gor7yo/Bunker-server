@@ -58,7 +58,7 @@ const logError = console.error;
 // ============================
 let mediasoupWorker = null;
 let mediasoupRouter = null;
-const mediasoupProducers = new Map(); // playerId -> { audio: Producer, video: Producer }
+const mediasoupProducers = new Map(); // playerId -> { video: Producer } (аудио отключено)
 const mediasoupTransports = new Map(); // playerId -> { send: Transport, recv: Transport }
 const mediasoupConsumers = new Map(); // playerId -> Map<producerId, Consumer>
 
@@ -137,15 +137,9 @@ async function initMediasoup() {
       process.exit(1);
     });
 
-    // Создаем router с кодеками
+    // Создаем router с кодеками (только видео, аудио отключено)
     mediasoupRouter = await mediasoupWorker.createRouter({
       mediaCodecs: [
-        {
-          kind: 'audio',
-          mimeType: 'audio/opus',
-          clockRate: 48000,
-          channels: 2,
-        },
         {
           kind: 'video',
           mimeType: 'video/VP8',
@@ -258,8 +252,14 @@ async function connectTransport(playerId, transportId, dtlsParameters, direction
   console.log(`✅ Transport подключен: ${playerId} (${direction})`);
 }
 
-// Создать producer (отправка медиа)
+// Создать producer (отправка медиа) - только видео
 async function createProducer(playerId, transportId, kind, rtpParameters) {
+  // Игнорируем аудио producers
+  if (kind === 'audio') {
+    console.warn(`⚠️ Попытка создать аудио producer для ${playerId} - игнорируем`);
+    throw new Error('Аудио не поддерживается');
+  }
+
   const playerTransports = mediasoupTransports.get(playerId);
   if (!playerTransports || !playerTransports.send) {
     throw new Error(`Send transport не найден для ${playerId}`);
