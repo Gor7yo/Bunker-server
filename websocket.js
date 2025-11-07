@@ -1514,7 +1514,9 @@ wss.on("connection", (ws) => {
         // 🎥 Mediasoup обработчики
         case "get_router_rtp_capabilities": {
           try {
+            console.log(`📡 [${ws.id}] Запрос router_rtp_capabilities`);
             if (!mediasoupRouter) {
+              console.error(`❌ [${ws.id}] Mediasoup router не инициализирован`);
               ws.send(JSON.stringify({
                 type: "error",
                 message: "Mediasoup не инициализирован. Worker не собран или не запущен."
@@ -1522,12 +1524,13 @@ wss.on("connection", (ws) => {
               return;
             }
             const rtpCapabilities = getRouterRtpCapabilities();
+            console.log(`✅ [${ws.id}] Отправка router_rtp_capabilities`);
             ws.send(JSON.stringify({
               type: "router_rtp_capabilities",
               rtpCapabilities
             }));
           } catch (error) {
-            logError("❌ Ошибка get_router_rtp_capabilities:", error);
+            logError(`❌ [${ws.id}] Ошибка get_router_rtp_capabilities:`, error);
             ws.send(JSON.stringify({
               type: "error",
               message: error.message || "Ошибка получения RTP capabilities"
@@ -1539,14 +1542,16 @@ wss.on("connection", (ws) => {
         case "create_transport": {
           try {
             const { direction } = data; // 'send' или 'recv'
+            console.log(`🚚 [${ws.id}] Создание транспорта: ${direction}`);
             const transportData = await createWebRtcTransport(ws.id, direction);
+            console.log(`✅ [${ws.id}] Transport создан: ${direction}, id: ${transportData.id}`);
             ws.send(JSON.stringify({
               type: "transport_created",
               direction,
               transportData
             }));
           } catch (error) {
-            logError("❌ Ошибка create_transport:", error);
+            logError(`❌ [${ws.id}] Ошибка create_transport:`, error);
             ws.send(JSON.stringify({
               type: "error",
               message: "Ошибка создания транспорта"
@@ -1558,14 +1563,16 @@ wss.on("connection", (ws) => {
         case "connect_transport": {
           try {
             const { transportId, dtlsParameters, direction } = data;
+            console.log(`🔌 [${ws.id}] Подключение транспорта: ${direction}, id: ${transportId}`);
             await connectTransport(ws.id, transportId, dtlsParameters, direction);
+            console.log(`✅ [${ws.id}] Transport подключен: ${direction}`);
             ws.send(JSON.stringify({
               type: "transport_connected",
               transportId,
               direction
             }));
           } catch (error) {
-            logError("❌ Ошибка connect_transport:", error);
+            logError(`❌ [${ws.id}] Ошибка connect_transport:`, error);
             ws.send(JSON.stringify({
               type: "error",
               message: "Ошибка подключения транспорта"
@@ -1577,13 +1584,15 @@ wss.on("connection", (ws) => {
         case "produce": {
           try {
             const { transportId, kind, rtpParameters } = data;
+            console.log(`📹 [${ws.id}] Создание producer: ${kind}, transport: ${transportId}`);
             const producerData = await createProducer(ws.id, transportId, kind, rtpParameters);
+            console.log(`✅ [${ws.id}] Producer создан: ${kind}, id: ${producerData.id}`);
             ws.send(JSON.stringify({
               type: "produced",
               producerData
             }));
           } catch (error) {
-            logError("❌ Ошибка produce:", error);
+            logError(`❌ [${ws.id}] Ошибка produce:`, error);
             ws.send(JSON.stringify({
               type: "error",
               message: "Ошибка создания producer"
@@ -1595,13 +1604,15 @@ wss.on("connection", (ws) => {
         case "consume": {
           try {
             const { producerId, rtpCapabilities } = data;
+            console.log(`📺 [${ws.id}] Создание consumer для producer: ${producerId}`);
             const consumerData = await createConsumer(ws.id, producerId, rtpCapabilities);
+            console.log(`✅ [${ws.id}] Consumer создан: id: ${consumerData.id}, producer: ${producerId}`);
             ws.send(JSON.stringify({
               type: "consumed",
               consumerData
             }));
           } catch (error) {
-            logError("❌ Ошибка consume:", error);
+            logError(`❌ [${ws.id}] Ошибка consume:`, error);
             ws.send(JSON.stringify({
               type: "error",
               message: "Ошибка создания consumer"
