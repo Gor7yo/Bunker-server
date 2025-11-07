@@ -143,13 +143,15 @@ async function createWebRtcTransport(playerId, direction = 'send') {
     throw new Error('Router не инициализирован');
   }
 
+  // Для Render.com используем автоматическое определение IP
+  // Render.com предоставляет внешний IP автоматически через переменные окружения
+  const listenIps = [{
+    ip: '0.0.0.0',
+    announcedIp: process.env.MEDIASOUP_ANNOUNCED_IP || null, // Можно указать вручную, если нужно
+  }];
+
   const transport = await mediasoupRouter.createWebRtcTransport({
-    listenIps: [
-      {
-        ip: '0.0.0.0',
-        announcedIp: process.env.MEDIASOUP_ANNOUNCED_IP || null, // Для Selectel укажите внешний IP
-      },
-    ],
+    listenIps,
     enableUdp: true,
     enableTcp: true,
     preferUdp: true,
