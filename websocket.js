@@ -2,6 +2,8 @@
 const WebSocket = require("ws");
 const mediasoup = require("mediasoup");
 const propertiesData = require("./properties.json");
+const fs = require("fs");
+const path = require("path");
 
 // ⚡ Оптимизации WebSocket Server
 const PORT = process.env.PORT || 5000;
@@ -61,15 +63,74 @@ const mediasoupTransports = new Map(); // playerId -> { send: Transport, recv: T
 const mediasoupConsumers = new Map(); // playerId -> Map<producerId, Consumer>
 
 // Инициализация mediasoup
+// Функция для поиска mediasoup worker
+function findMediasoupWorker() {
+  const possiblePaths = [
+    // Стандартный путь (npm)
+    path.join(__dirname, 'node_modules', 'mediasoup', 'worker', 'out', 'Release', 'mediasoup-worker'),
+    // Путь для pnpm
+    path.join(__dirname, 'node_modules', '.pnpm', 'mediasoup@3.19.7', 'node_modules', 'mediasoup', 'worker', 'out', 'Release', 'mediasoup-worker'),
+  ];
+
+  // Также ищем через glob pattern для pnpm (версия может отличаться)
+  if (fs.existsSync(path.join(__dirname, 'node_modules', '.pnpm'))) {
+    try {
+      const pnpmDir = path.join(__dirname, 'node_modules', '.pnpm');
+      const entries = fs.readdirSync(pnpmDir);
+      for (const entry of entries) {
+        if (entry.startsWith('mediasoup@')) {
+          const workerPath = path.join(pnpmDir, entry, 'node_modules', 'mediasoup', 'worker', 'out', 'Release', 'mediasoup-worker');
+          if (fs.existsSync(workerPath)) {
+            possiblePaths.push(workerPath);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('⚠️ Не удалось просканировать .pnpm директорию:', err.message);
+    }
+  }
+
+  // Проверяем каждый путь
+  for (const workerPath of possiblePaths) {
+    if (fs.existsSync(workerPath)) {
+      console.log(`✅ Найден mediasoup worker: ${workerPath}`);
+      return workerPath;
+    }
+  }
+
+  return null;
+}
+
 async function initMediasoup() {
   try {
+    // Ищем worker явно
+    const workerPath = findMediasoupWorker();
+    
+    if (!workerPath) {
+      throw new Error('Mediasoup worker не найден. Убедитесь, что worker собран.');
+    }
+
+    // Проверяем права на выполнение
+    try {
+      fs.accessSync(workerPath, fs.constants.F_OK | fs.constants.X_OK);
+    } catch (err) {
+      console.warn(`⚠️ Worker найден, но нет прав на выполнение. Попробуйте: chmod +x ${workerPath}`);
+    }
+
+    // Устанавливаем переменную окружения для mediasoup
+    // Mediasoup автоматически использует MEDIASOUP_WORKER_BIN если она установлена
+    process.env.MEDIASOUP_WORKER_BIN = workerPath;
+    console.log(`📦 Установлена переменная окружения MEDIASOUP_WORKER_BIN: ${workerPath}`);
+
     // Создаем worker
-    mediasoupWorker = await mediasoup.createWorker({
+    const workerOptions = {
       logLevel: 'warn',
       logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp'],
       rtcMinPort: 40000,
       rtcMaxPort: 49999,
-    });
+    };
+
+    mediasoupWorker = await mediasoup.createWorker(workerOptions);
 
     mediasoupWorker.on('died', () => {
       console.error('❌ Mediasoup worker died, exiting...');
