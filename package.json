@@ -1,15 +1,17 @@
 {
   "name": "server",
   "version": "1.0.0",
-  "description": "",
+  "description": "Bunker Game WebSocket Server",
   "main": "websocket.js",
   "scripts": {
-    "start": "node websocket.js",
-    "dev": "nodemon websocket.js"
+    "start": "node websocket.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.1.0",

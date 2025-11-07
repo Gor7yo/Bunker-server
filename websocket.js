@@ -3,12 +3,13 @@ const WebSocket = require("ws");
 const propertiesData = require("./properties.json");
 
 // ⚡ Оптимизации WebSocket Server
+const PORT = process.env.PORT || 5000;
 const wss = new WebSocket.Server({ 
-  port: 5000,
+  port: PORT,
   perMessageDeflate: false, // Отключаем сжатие для снижения CPU (WebRTC сигналы маленькие)
   maxPayload: 1024 * 1024, // 1MB максимум
   clientTracking: true
-}, () => console.log("✅ Сервер запущен на порту 5000"));
+}, () => console.log(`✅ Сервер запущен на порту ${PORT}`));
 
 const MAX_PLAYERS = 8; // Увеличил до 8
 let allPlayers = [];
