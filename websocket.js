@@ -2143,10 +2143,15 @@ wss.on("connection", (ws) => {
         }
 
         default:
-          ws.send(JSON.stringify({ type: "error", message: "Неизвестная команда" }));
+          logError(`⚠️ Неизвестная команда: ${data.type}`, data);
+          ws.send(JSON.stringify({ 
+            type: "error", 
+            message: `Неизвестная команда: ${data.type}` 
+          }));
       }
     } catch (error) {
       console.error("❌ Ошибка обработки сообщения:", error);
+      console.error("❌ Данные сообщения:", message.toString());
       ws.send(JSON.stringify({ type: "error", message: "Ошибка сервера" }));
     }
   });
