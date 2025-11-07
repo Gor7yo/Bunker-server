@@ -134,7 +134,10 @@ async function initMediasoup() {
 
 // Получить RTP capabilities роутера
 function getRouterRtpCapabilities() {
-  return mediasoupRouter ? mediasoupRouter.rtpCapabilities : null;
+  if (!mediasoupRouter) {
+    throw new Error('Mediasoup router не инициализирован. Worker не собран или не запущен.');
+  }
+  return mediasoupRouter.rtpCapabilities;
 }
 
 // Создать WebRTC транспорт для отправки
@@ -1512,23 +1515,23 @@ wss.on("connection", (ws) => {
         // 🎥 Mediasoup обработчики
         case "get_router_rtp_capabilities": {
           try {
-            const rtpCapabilities = getRouterRtpCapabilities();
-            if (rtpCapabilities) {
-              ws.send(JSON.stringify({
-                type: "router_rtp_capabilities",
-                rtpCapabilities
-              }));
-            } else {
+            if (!mediasoupRouter) {
               ws.send(JSON.stringify({
                 type: "error",
-                message: "Router не инициализирован"
+                message: "Mediasoup не инициализирован. Worker не собран или не запущен."
               }));
+              return;
             }
+            const rtpCapabilities = getRouterRtpCapabilities();
+            ws.send(JSON.stringify({
+              type: "router_rtp_capabilities",
+              rtpCapabilities
+            }));
           } catch (error) {
             logError("❌ Ошибка get_router_rtp_capabilities:", error);
             ws.send(JSON.stringify({
               type: "error",
-              message: "Ошибка получения RTP capabilities"
+              message: error.message || "Ошибка получения RTP capabilities"
             }));
           }
           break;
@@ -2203,9 +2206,14 @@ wss.on("connection", (ws) => {
 });
 
 // Инициализируем mediasoup при старте
+// Если mediasoup не работает, сервер все равно запустится (без медиа-функций)
 initMediasoup().then(() => {
   console.log("🚀 Сервер 'Бункер' готов для 8 игроков!");
+  console.log("✅ Mediasoup активен - медиа-функции доступны");
 }).catch((error) => {
-  console.error("❌ Критическая ошибка инициализации mediasoup:", error);
-  process.exit(1);
+  console.error("⚠️ Mediasoup не инициализирован:", error.message);
+  console.log("⚠️ Сервер запущен БЕЗ медиа-функций (только WebSocket)");
+  console.log("⚠️ Для работы медиа нужно собрать mediasoup worker");
+  console.log("💡 Попробуйте: cd node_modules/mediasoup && npm run build:worker");
+  // НЕ завершаем процесс - сервер может работать без медиа
 });
