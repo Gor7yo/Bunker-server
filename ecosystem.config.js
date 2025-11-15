@@ -10,7 +10,7 @@ module.exports = {
     env: {
       NODE_ENV: 'production',
       PORT: 5000,
-      USE_MEDIASOUP: 'true'
+      USE_MEDIASOUP: 'false'
     },
     error_file: './logs/err.log',
     out_file: './logs/out.log',
