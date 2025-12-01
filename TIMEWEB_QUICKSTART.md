@@ -70,7 +70,7 @@ const socket = new WebSocket("wss://your-domain.com");
 ```javascript
 const wsUrl = 'ws://your-server-ip:5000';
 // или с SSL:
-const wsUrl = 'wss://your-domain.com';
+const wsUrl = 'https://bunker-server-ujdj.onrender.com';
 ```
 
 ## 📋 Чеклист

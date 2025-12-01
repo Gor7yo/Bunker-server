@@ -146,12 +146,12 @@ certbot renew --dry-run
 
 **`client/src/pages/JoinRoom/JoinRoom.jsx`:**
 ```javascript
-const socket = new WebSocket("wss://api.bunker-server.ru");
+const socket = new WebSocket("https://bunker-server-ujdj.onrender.com");
 ```
 
 **`client/src/pages/AdminPanel/AdminPanel.jsx`:**
 ```javascript
-const wsUrl = 'wss://api.bunker-server.ru';
+const wsUrl = 'https://bunker-server-ujdj.onrender.com';
 ```
 
 **Примечание:** Клиент уже обновлен на `api.bunker-server.ru` ✅
