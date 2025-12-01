@@ -64,42 +64,7 @@ const mediasoupConsumers = new Map(); // playerId -> Map<producerId, Consumer>
 
 // Инициализация mediasoup
 // Функция для поиска mediasoup worker
-function findMediasoupWorker() {
-  const possiblePaths = [
-    // Стандартный путь (npm)
-    path.join(__dirname, 'node_modules', 'mediasoup', 'worker', 'out', 'Release', 'mediasoup-worker'),
-    // Путь для pnpm
-    path.join(__dirname, 'node_modules', '.pnpm', 'mediasoup@3.19.7', 'node_modules', 'mediasoup', 'worker', 'out', 'Release', 'mediasoup-worker'),
-  ];
 
-  // Также ищем через glob pattern для pnpm (версия может отличаться)
-  if (fs.existsSync(path.join(__dirname, 'node_modules', '.pnpm'))) {
-    try {
-      const pnpmDir = path.join(__dirname, 'node_modules', '.pnpm');
-      const entries = fs.readdirSync(pnpmDir);
-      for (const entry of entries) {
-        if (entry.startsWith('mediasoup@')) {
-          const workerPath = path.join(pnpmDir, entry, 'node_modules', 'mediasoup', 'worker', 'out', 'Release', 'mediasoup-worker');
-          if (fs.existsSync(workerPath)) {
-            possiblePaths.push(workerPath);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('⚠️ Не удалось просканировать .pnpm директорию:', err.message);
-    }
-  }
-
-  // Проверяем каждый путь
-  for (const workerPath of possiblePaths) {
-    if (fs.existsSync(workerPath)) {
-      console.log(`✅ Найден mediasoup worker: ${workerPath}`);
-      return workerPath;
-    }
-  }
-
-  return null;
-}
 
 async function initMediasoup() {
   try {
@@ -2283,21 +2248,8 @@ wss.on("connection", (ws) => {
 
 // Инициализируем mediasoup при старте (только если включен через переменную окружения)
 // По умолчанию используем P2P (mediasoup не нужен)
-const USE_MEDIASOUP = process.env.USE_MEDIASOUP === 'true';
 
-if (USE_MEDIASOUP) {
-  initMediasoup().then(() => {
-    console.log("🚀 Сервер 'Бункер' готов для 8 игроков!");
-    console.log("✅ Mediasoup активен - медиа-функции доступны");
-  }).catch((error) => {
-    console.error("⚠️ Mediasoup не инициализирован:", error.message);
-    console.log("⚠️ Сервер запущен БЕЗ медиа-функций (только WebSocket)");
-    console.log("⚠️ Для работы медиа нужно собрать mediasoup worker");
-    console.log("💡 Попробуйте: cd node_modules/mediasoup && npm run build:worker");
-    // НЕ завершаем процесс - сервер может работать без медиа
-  });
-} else {
-  console.log("🚀 Сервер 'Бункер' готов для 8 игроков!");
-  console.log("✅ Режим P2P (WebSocket + WebRTC между клиентами)");
-  console.log("ℹ️  Mediasoup отключен - используется прямое P2P соединение");
-}
+console.log("🚀 Сервер 'Бункер' готов для 8 игроков!");
+console.log("✅ Режим P2P (WebSocket + WebRTC между клиентами)");
+console.log("ℹ️  Mediasoup отключен - используется прямое P2P соединение");
+
