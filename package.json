@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node websocket.js",
     "build:mediasoup": "node build-mediasoup.js",
-    "postinstall": "npm run build:mediasoup || echo 'Mediasoup worker will be built on first run'"
+    "postinstall": "npm run start || echo 'Mediasoup worker will be built on first run'"
   },
   "keywords": [],
   "author": "",
